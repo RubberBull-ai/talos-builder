@@ -1,0 +1,126 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Martin Kuhn <martin@kuhn.host>
+Date: Sat, 19 Sep 2026 20:46:52 +0200
+Subject: [PATCH] u-boot: debug build, console on HDMI, interruptible autoboot
+
+The Pi 5 U-Boot shows nothing on HDMI with the mainline 6.18 DT: its
+HDMI node is "brcm,bcm2712-hdmi0", which the bcm2835 video driver of
+v2025.04 does not match, so no video device and no vidconsole exist
+(VIDEO, VIDEO_BCM2835, USB_KEYBOARD and the stdin/stdout/stderr env
+are already enabled). Backport upstream 812aca579140 which adds that
+compatible.
+
+Debug config on top of rpi_5_defconfig (artifacts/u-boot/debug.config):
+BOOTDELAY=5, BOOTSTD_FULL + CMD_BOOTFLOW_FULL with bootcmd
+"bootflow scan -lb" (lists each bootdev/bootflow), LOG with debug
+compiled in and info shown by default, CMD_LOG.
+
+With CMD_BOOTFLOW_FULL a bare "bootflow scan" no longer boots, so the
+PREBOOT scan becomes scan-only and the boot happens in bootcmd after
+the delay, in the same bootdev order.
+---
+ artifacts/u-boot/debug.config                 | 31 +++++++++++++++++++
+ ...pi-Add-brcm-bcm2712-hdmi0-compatible.patch | 27 ++++++++++++++++
+ artifacts/u-boot/pkg.yaml                     | 12 +++++++
+ 3 files changed, 70 insertions(+)
+ create mode 100644 artifacts/u-boot/debug.config
+ create mode 100644 artifacts/u-boot/patches/0001-video-arm-rpi-Add-brcm-bcm2712-hdmi0-compatible.patch
+
+diff --git a/artifacts/u-boot/debug.config b/artifacts/u-boot/debug.config
+new file mode 100644
+index 0000000..782bcb6
+--- /dev/null
++++ b/artifacts/u-boot/debug.config
+@@ -0,0 +1,31 @@
++# Debug build: U-Boot console on HDMI + interruptible autoboot + boot diagnostics.
++# Appended to rpi_5_defconfig's .config, resolved with `make olddefconfig`;
++# the build fails if any line below does not survive into the final .config.
++
++# Console on HDMI and USB keyboard (already in rpi_5_defconfig; asserted here).
++# rpi.env sets stdin=serial,usbkbd / stdout=serial,vidconsole / stderr=serial,vidconsole.
++CONFIG_VIDEO=y
++CONFIG_VIDEO_BCM2835=y
++CONFIG_SYS_CONSOLE_IS_IN_ENV=y
++CONFIG_CONSOLE_MUX=y
++CONFIG_USB_KEYBOARD=y
++
++# 5 s window to interrupt autoboot (default 2).
++CONFIG_BOOTDELAY=5
++
++# bootflow/bootdev/bootmeth subcommands and `bootflow scan -l` (lists every
++# bootdev/bootflow as it is scanned). With CMD_BOOTFLOW_FULL a bare
++# `bootflow scan` only scans, it no longer boots, so:
++# - PREBOOT's `bootflow scan` becomes scan-only (no boot before the delay),
++# - bootcmd must say -b explicitly: `bootflow scan -lb` (same bootdev order,
++#   boot_targets from rpi.env, just listed).
++CONFIG_BOOTSTD_FULL=y
++CONFIG_CMD_BOOTFLOW_FULL=y
++CONFIG_BOOTCOMMAND="bootflow scan -lb"
++
++# Logging: debug messages compiled in, info shown by default (`log level 7` at the prompt for more).
++CONFIG_LOG=y
++CONFIG_LOG_MAX_LEVEL=7
++CONFIG_LOG_DEFAULT_LEVEL=6
++CONFIG_LOG_CONSOLE=y
++CONFIG_CMD_LOG=y
+diff --git a/artifacts/u-boot/patches/0001-video-arm-rpi-Add-brcm-bcm2712-hdmi0-compatible.patch b/artifacts/u-boot/patches/0001-video-arm-rpi-Add-brcm-bcm2712-hdmi0-compatible.patch
+new file mode 100644
+index 0000000..990d88a
+--- /dev/null
++++ b/artifacts/u-boot/patches/0001-video-arm-rpi-Add-brcm-bcm2712-hdmi0-compatible.patch
+@@ -0,0 +1,27 @@
++From 812aca5791404ad5df469fe3240638573e39e063 Mon Sep 17 00:00:00 2001
++From: Peter Robinson <pbrobinson@gmail.com>
++Date: Tue, 21 Apr 2026 09:51:59 +0100
++Subject: [PATCH] video: arm: rpi: Add brcm,bcm2712-hdmi0 compatible
++
++The 'brcm,bcm2712-hdmi0' compatible string is used on RPi5.
++There appears to be no change that impacts early boot output
++on the display controller so add the RPi5 compatible string.
++
++Signed-off-by: Peter Robinson <pbrobinson@gmail.com>
++Reviewed-by: Matthias Brugger <mbrugger@suse.com>
++---
++ drivers/video/bcm2835.c | 1 +
++ 1 file changed, 1 insertion(+)
++
++diff --git a/drivers/video/bcm2835.c b/drivers/video/bcm2835.c
++index 0c81e6066229..0e0cc1979eb5 100644
++--- a/drivers/video/bcm2835.c
+++++ b/drivers/video/bcm2835.c
++@@ -66,6 +66,7 @@ static int bcm2835_video_probe(struct udevice *dev)
++ static const struct udevice_id bcm2835_video_ids[] = {
++ 	{ .compatible = "brcm,bcm2835-hdmi" },
++ 	{ .compatible = "brcm,bcm2711-hdmi0" },
+++	{ .compatible = "brcm,bcm2712-hdmi0" },
++ 	{ .compatible = "brcm,bcm2708-fb" },
++ #if !IS_ENABLED(CONFIG_VIDEO_DT_SIMPLEFB)
++ 	{ .compatible = "simple-framebuffer" },
+diff --git a/artifacts/u-boot/pkg.yaml b/artifacts/u-boot/pkg.yaml
+index 9d580a0..b4a1f0f 100644
+--- a/artifacts/u-boot/pkg.yaml
++++ b/artifacts/u-boot/pkg.yaml
+@@ -14,8 +14,20 @@ steps:
+     prepare:
+       - |
+         tar xf u-boot.tar.gz --strip-components=1
++      - |
++        for patch in $(find /pkg/patches -type f -name "*.patch" | sort); do
++          patch -p1 < "$patch" || exit 1
++        done
+       - |
+         make rpi_5_defconfig
++      - |
++        # Debug options (HDMI console, BOOTDELAY, bootstd listing, logging).
++        grep -v '^#' /pkg/debug.config | grep . >> .config
++        make olddefconfig
++        # Fail if kconfig dropped or changed any requested option.
++        grep -v '^#' /pkg/debug.config | grep . | while IFS= read -r opt; do
++          grep -qxF "$opt" .config || { echo "debug.config: '$opt' not in final .config" >&2; exit 1; }
++        done
+     build:
+       - |
+         make -j $(nproc) HOSTLDLIBS_mkimage="-lssl -lcrypto" u-boot.bin
+-- 
+2.51.1
+

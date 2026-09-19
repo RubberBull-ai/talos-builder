@@ -67,7 +67,7 @@ checkouts-clean:
 #
 # Patches
 #
-.PHONY: patches-pkgs patches-talos patches
+.PHONY: patches-pkgs patches-talos patches-sbcoverlay patches
 patches-pkgs:
 	cd "$(CHECKOUTS_DIRECTORY)/pkgs" && \
 		git am --committer-date-is-author-date "$(PATCHES_DIRECTORY)/siderolabs/pkgs/0001-Patched-for-Raspberry-Pi-5.patch"
@@ -78,7 +78,13 @@ patches-talos:
 		git am --committer-date-is-author-date "$(PATCHES_DIRECTORY)/siderolabs/talos/0002-Skip-NVRAM-writes-for-GRUB-on-arm64.patch" && \
 		git am --committer-date-is-author-date "$(PATCHES_DIRECTORY)/siderolabs/talos/0003-Force-GRUB-bootloader-on-arm64.patch"
 
-patches: patches-pkgs patches-talos
+# Changes the overlay checkout's HEAD, hence SBCOVERLAY_TAG (and so forces a
+# new overlay + installer build while the kernel tag stays the same).
+patches-sbcoverlay:
+	cd "$(CHECKOUTS_DIRECTORY)/sbc-raspberrypi5" && \
+		git am --committer-date-is-author-date "$(PATCHES_DIRECTORY)/talos-rpi5/sbc-raspberrypi5/0001-u-boot-debug-build-console-on-HDMI-interruptible-aut.patch"
+
+patches: patches-pkgs patches-talos patches-sbcoverlay
 
 
 
