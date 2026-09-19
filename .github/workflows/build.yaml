@@ -13,7 +13,9 @@ jobs:
       packages: write
       attestations: write
       id-token: write
-    runs-on: ubuntu-24.04-arm
+    # Ubicloud managed arm64 runner (RubberBull-ai org); the kernel build is
+    # CPU-bound (make -j $(nproc)), so use the largest arm64 size.
+    runs-on: ubicloud-standard-60-arm
     steps:
       - uses: actions/checkout@v4
       - uses: imjasonh/setup-crane@v0.4

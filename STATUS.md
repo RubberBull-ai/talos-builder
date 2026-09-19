@@ -103,8 +103,9 @@ clang). 3-way merge conflicts resolved by keeping the patch's intent:
 ### `patches/siderolabs/talos/0001` - modules-arm64.txt
 
 Upstream v1.14.1 list, minus the modules our config builds in, plus the
-modules the v1.12.2 list added. Generated from an actual 6.18.51 `modules`
-build with this config (no placeholder anymore). The module-list part that
+modules the v1.12.2 list added. Removals cross-checked against
+`make olddefconfig` of this config on 6.18.51; the depmod step of the Talos
+build (fails on any missing/unresolved module) is the final check. The module-list part that
 v1.12.2 had put into patch 0003 is folded in here.
 
 ### `patches/siderolabs/talos/0002` - Skip NVRAM writes on arm64
@@ -120,7 +121,9 @@ Unchanged logic (`NewAuto()` returns GRUB on arm64); modules-list hunk moved to 
 - `workflow_dispatch` added: branch builds without a tag
   (`gh workflow run build.yaml --ref talos_v_1-14-1`). `make release` and the
   GitHub Release only run on `v*` tags.
-- Images go to `ghcr.io/<lowercased repo owner>/...` (`upmkuhn`).
+- Runs on Ubicloud `ubicloud-standard-60-arm` (repo moved to the RubberBull-ai org).
+- Images go to `ghcr.io/<lowercased repo owner>/...` = `ghcr.io/rubberbull-ai/...`
+  (installer release tag: `ghcr.io/rubberbull-ai/installer:v1.14.1-rpi5`).
 
 ## Open TODOs
 
