@@ -103,9 +103,13 @@ clang). 3-way merge conflicts resolved by keeping the patch's intent:
 ### `patches/siderolabs/talos/0001` - modules-arm64.txt
 
 Upstream v1.14.1 list, minus the modules our config builds in, plus the
-modules the v1.12.2 list added. Removals cross-checked against
-`make olddefconfig` of this config on 6.18.51; the depmod step of the Talos
-build (fails on any missing/unresolved module) is the final check. The module-list part that
+modules the v1.12.2 list added that still exist. Checked against the kernel
+CI actually built (`ghcr.io/rubberbull-ai/kernel:v1.14.0-26-g138c6a4`, 307
+modules): every listed file exists and Talos' depmod check
+(`depmod --errsyms -w`) is clean. Dropped vs. the first attempt:
+`usbhid.ko`, `sdhci.ko` (now built in), `cdc-phonet.ko` (PHONET off in 1.14);
+re-added upstream modules that are still `=m` here (`idpf`, `libeth_xdp`,
+`irdma`, `ublk_drv`, `hid-logitech`, `hid-lg-g15`). The module-list part that
 v1.12.2 had put into patch 0003 is folded in here.
 
 ### `patches/siderolabs/talos/0002` - Skip NVRAM writes on arm64

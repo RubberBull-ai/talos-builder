@@ -1,4 +1,4 @@
-From 350c36c2029deefe6ca728c78f7daa3d4414e451 Mon Sep 17 00:00:00 2001
+From 2844e1adefba6994f1e520211fcb01b386297b57 Mon Sep 17 00:00:00 2001
 From: Martin Kuhn <martin@kuhn.host>
 Date: Sat, 31 Jan 2026 12:32:26 +0100
 Subject: [PATCH 3/3] Force GRUB bootloader on arm64

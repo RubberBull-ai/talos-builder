@@ -1,4 +1,4 @@
-From 5dab172b65a9a476107753eaddb3ffb68af6080a Mon Sep 17 00:00:00 2001
+From 6cc91581389a83e20ecb0d0ca2a2816c8bd556e2 Mon Sep 17 00:00:00 2001
 From: Martin Kuhn <martin@kuhn.host>
 Date: Sat, 31 Jan 2026 12:12:13 +0100
 Subject: [PATCH 2/3] Skip NVRAM writes for GRUB on arm64
