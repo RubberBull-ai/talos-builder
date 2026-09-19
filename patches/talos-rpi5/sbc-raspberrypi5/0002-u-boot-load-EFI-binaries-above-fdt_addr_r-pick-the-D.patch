@@ -1,0 +1,105 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Martin Kuhn <martin@kuhn.host>
+Date: Sat, 19 Sep 2026 21:40:00 +0200
+Subject: [PATCH] u-boot: load EFI binaries above fdt_addr_r, pick the D0 DT on
+ D0 boards
+
+0002: rpi.env had kernel_addr_r=0x00080000 and fdt_addr_r=0x02600000.
+The EFI network boot TFTPs the ~160M Talos UKI to kernel_addr_r and then
+the DT to fdt_addr_r, i.e. into the UKI's initrd: the initramfs fails its
+zstd checksum and Talos dies with "failed to mount squashfs: openfs
+failed: failed to create root filesystem: FSCONFIG_CMD_CREATE failed:
+invalid argument". Move kernel_addr_r to 0x02800000 and ramdisk_addr_r
+to 0x1a800000. Reproduced and verified in QEMU (U-Boot EFI net boot of
+the v1.14.1 UKI: corrupt with the old address, boots with the new).
+
+0003: fdtfile is broadcom/bcm2712-rpi-5-b.dtb for both Pi 5 steppings;
+select broadcom/bcm2712-d-rpi-5-b.dtb when the firmware DT has the D0
+pin controller ("brcm,bcm2712d0-pinctrl").
+---
+ ...load-the-kernel-UKI-above-fdt_addr_r.patch | 37 +++++++++++++++++++
+ ...ine-D0-device-tree-on-Pi-5-D0-boards.patch | 31 ++++++++++++++++
+ 2 files changed, 68 insertions(+)
+ create mode 100644 artifacts/u-boot/patches/0002-rpi-load-the-kernel-UKI-above-fdt_addr_r.patch
+ create mode 100644 artifacts/u-boot/patches/0003-rpi-pick-the-mainline-D0-device-tree-on-Pi-5-D0-boards.patch
+
+diff --git a/artifacts/u-boot/patches/0002-rpi-load-the-kernel-UKI-above-fdt_addr_r.patch b/artifacts/u-boot/patches/0002-rpi-load-the-kernel-UKI-above-fdt_addr_r.patch
+new file mode 100644
+index 0000000..a668672
+--- /dev/null
++++ b/artifacts/u-boot/patches/0002-rpi-load-the-kernel-UKI-above-fdt_addr_r.patch
+@@ -0,0 +1,37 @@
++From: Martin Kuhn <martin@kuhn.host>
++Subject: [PATCH] rpi: load the kernel/UKI above fdt_addr_r
++
++The EFI network boot (boot/bootmeth_efi.c) TFTPs the EFI binary to
++kernel_addr_r and afterwards the device tree to fdt_addr_r. With
++kernel_addr_r=0x00080000 and fdt_addr_r=0x02600000 any EFI binary larger
++than 37.5M is overwritten by the DT. The Talos UKI is ~160M: the DT lands
++in its initrd, the initramfs fails its zstd checksum ("rootfs image is not
++initramfs (ZSTD-compressed data is corrupt)") and Talos cannot mount its
++squashfs rootfs.
++
++Move kernel_addr_r to 0x02800000 (2M aligned, after the 1M script, pxefile
++and fdt slots) and ramdisk_addr_r to 0x1a800000, a 384M window.
++---
++--- a/board/raspberrypi/rpi/rpi.env
+++++ b/board/raspberrypi/rpi/rpi.env
++@@ -68,10 +68,18 @@
++ fdt_high=ffffffff
++ initrd_high=ffffffff
++ #endif
++-kernel_addr_r=0x00080000
+++/*
+++ * Talos: the kernel slot goes above the small buffers. The EFI network boot
+++ * (bootmeth_efi) TFTPs the whole UKI (~160M) to kernel_addr_r and then the
+++ * device tree to fdt_addr_r; with kernel_addr_r=0x00080000 the DT landed
+++ * inside the UKI's initrd and corrupted it. 0x02800000 is 2M aligned (booti
+++ * needs no relocation) and leaves 384M for the kernel/UKI before
+++ * ramdisk_addr_r, which still fits a 1G board.
+++ */
++ scriptaddr=0x02400000
++ pxefile_addr_r=0x02500000
++ fdt_addr_r=0x02600000
++-ramdisk_addr_r=0x02700000
+++kernel_addr_r=0x02800000
+++ramdisk_addr_r=0x1a800000
++ 
++ boot_targets=mmc usb pxe dhcp
+diff --git a/artifacts/u-boot/patches/0003-rpi-pick-the-mainline-D0-device-tree-on-Pi-5-D0-boards.patch b/artifacts/u-boot/patches/0003-rpi-pick-the-mainline-D0-device-tree-on-Pi-5-D0-boards.patch
+new file mode 100644
+index 0000000..c1dd64d
+--- /dev/null
++++ b/artifacts/u-boot/patches/0003-rpi-pick-the-mainline-D0-device-tree-on-Pi-5-D0-boards.patch
+@@ -0,0 +1,31 @@
++From: Martin Kuhn <martin@kuhn.host>
++Subject: [PATCH] rpi: pick the mainline D0 device tree on Pi 5 D0 boards
++
++The Pi 5 Model B revision code (0x17) is the same for the C1 and D0 SoC
++steppings, so fdtfile is always broadcom/bcm2712-rpi-5-b.dtb. Mainline
++Linux has a separate DT for D0 (bcm2712-d-rpi-5-b.dtb). The firmware
++passes its D0 DT (bcm2712d0-rpi-5-b.dtb) on D0 boards, which is the only
++one with a "brcm,bcm2712d0-pinctrl" node; use that to select the D0 file.
++---
++--- a/board/raspberrypi/rpi/rpi.c
+++++ b/board/raspberrypi/rpi/rpi.c
++@@ -351,6 +351,19 @@
++ 		return;
++ 
++ 	fdtfile = model->fdtfile;
+++
+++	/*
+++	 * Talos: the Pi 5 Model B revision code is the same for the C1 and D0
+++	 * SoC steppings, but mainline Linux has a separate DT for D0. The
+++	 * firmware hands over its D0 DT (bcm2712d0-rpi-5-b.dtb) on D0 boards,
+++	 * recognisable by its D0 pin controller.
+++	 */
+++	if (!strcmp(fdtfile, DTB_DIR "bcm2712-rpi-5-b.dtb") &&
+++	    fdt_magic(fw_dtb_pointer) == FDT_MAGIC &&
+++	    fdt_node_offset_by_compatible((void *)fw_dtb_pointer, -1,
+++					  "brcm,bcm2712d0-pinctrl") >= 0)
+++		fdtfile = DTB_DIR "bcm2712-d-rpi-5-b.dtb";
+++
++ 	env_set("fdtfile", fdtfile);
++ }
++ 

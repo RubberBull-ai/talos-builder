@@ -68,6 +68,53 @@ gained a `context.Context`), so the v1.9.5-machinery overlay binary still works.
   (`disable-bt`, `disable-wifi` in config.txt); they may not apply cleanly to
   the mainline DT (firmware ignores failing overlays).
 
+## Boot fixes after the rpi-06 hardware test (2026-09-19)
+
+Tested on rpi-06 (Pi 5 Model B C1, NVMe HAT, PXE from 192.168.0.2). Boot
+chain: EEPROM firmware -> config.txt + `bcm2712-rpi-5-b.dtb` -> `u-boot.bin`
+-> NVMe, else network (pxelinux.cfg misses, then EFI net boot of
+`vmlinuz.efi` + `dtb/broadcom/bcm2712-rpi-5-b.dtb` via TFTP) -> kernel.
+
+1. **U-Boot needs the downstream (Raspberry Pi) DT**, the kernel the
+   mainline one. U-Boot dies on the mainline DT; the 6.18 kernel has no
+   Ethernet with the downstream DT. The overlay (overlay patch 0003) now ships the
+   downstream DTs of the pinned firmware release (1.20250430,
+   byte-identical to v1.11.5.2's) at the boot partition root, next to
+   `overlays/`, and the kernel's mainline DTs under `dtb/broadcom/`, where
+   U-Boot's EFI boot loads `${fdtfile}` from.
+2. **Squashfs failure** (`failed to mount squashfs: openfs failed: failed to
+   create root filesystem: FSCONFIG_CMD_CREATE failed: invalid argument`)
+   was not the kernel config (16K pages are fine; the UKI boots in QEMU with
+   16K pages, via U-Boot EFI, with 640 MB RAM). U-Boot's EFI net boot TFTPs
+   the ~160 MB UKI to `kernel_addr_r=0x00080000` and then the DT to
+   `fdt_addr_r=0x02600000`, i.e. into the UKI's initrd -> initramfs zstd
+   checksum fails, extensions and rootfs damaged. Reproduced exactly in
+   QEMU (U-Boot EFI net boot). Fix: overlay patch 0002 (U-Boot patch `0002-rpi-load-the-kernel-UKI-above-fdt_addr_r`) moves
+   `kernel_addr_r` to 0x02800000 (`ramdisk_addr_r` 0x1a800000); verified
+   in QEMU. Only affected network boot of the UKI (the NVMe path loads
+   GRUB, which is small).
+3. **Consoles**: overlay kernel args are now `console=ttyAMA10,115200
+   console=tty0` (tty0 last = /dev/console = Talos logs on HDMI; ttyAMA10
+   is the Pi 5 debug UART with the mainline DT).
+4. **D0 boards**: U-Boot's fdtfile is `broadcom/bcm2712-rpi-5-b.dtb` for
+   every Pi 5 Model B stepping; U-Boot patch `0003-rpi-pick-the-mainline-D0-device-tree...` (overlay patch 0002) switches to
+   `broadcom/bcm2712-d-rpi-5-b.dtb` when the firmware DT has the D0 pin
+   controller (`brcm,bcm2712d0-pinctrl`).
+5. U-Boot keeps the HDMI compatible backport and BOOTDELAY=5; the earlier
+   debug options that changed boot behaviour (BOOTSTD_FULL, bootcmd
+   `bootflow scan -lb`, LOG) are dropped.
+
+### PXE (TFTP root) layout, from the installer image
+
+| installer image path | TFTP path |
+|---|---|
+| `overlay/artifacts/arm64/u-boot/rpi5/u-boot.bin` | `u-boot.bin` |
+| `overlay/artifacts/arm64/firmware/boot/bcm2712*.dtb` (downstream) | `bcm2712*.dtb` |
+| `overlay/artifacts/arm64/firmware/boot/overlays/` | `overlays/` |
+| `overlay/artifacts/arm64/firmware/boot/dtb/broadcom/bcm2712*.dtb` (mainline) | `dtb/broadcom/bcm2712*.dtb` |
+| `usr/install/arm64/vmlinuz.efi` | `vmlinuz.efi` (+ `EFI/Linux/Talos.efi`) |
+| `usr/install/arm64/systemd-boot.efi` | `systemd-boot.efi` (+ `EFI/boot/BOOTAA64.efi`) |
+
 ## Ethernet (macb)
 
 The Pi 5 Ethernet stall fixes (sbc-raspberrypi#91) come in with the pkgs bump;
@@ -149,7 +196,8 @@ Unchanged logic (`NewAuto()` returns GRUB on arm64); modules-list hunk moved to 
 
 ## Open TODOs
 
-1. Boot-test on one Pi 5 (rpi-06) from NVMe before rollout (see risks above).
+1. Boot-test on one Pi 5 (rpi-06) from PXE and NVMe with the fixes above
+   (the risks listed above are addressed by them).
 2. Verify Ethernet stability over a few days (macb fixes are in).
 3. Consider moving the overlay to one that ships DTBs matched to the mainline
    kernel *and* a PCIe-capable U-Boot (e.g. once sbc-raspberrypi PR #88 lands).

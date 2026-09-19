@@ -82,7 +82,7 @@ patches-talos:
 # new overlay + installer build while the kernel tag stays the same).
 patches-sbcoverlay:
 	cd "$(CHECKOUTS_DIRECTORY)/sbc-raspberrypi5" && \
-		git am --committer-date-is-author-date "$(PATCHES_DIRECTORY)/talos-rpi5/sbc-raspberrypi5/0001-u-boot-debug-build-console-on-HDMI-interruptible-aut.patch"
+		git am --committer-date-is-author-date "$(PATCHES_DIRECTORY)"/talos-rpi5/sbc-raspberrypi5/*.patch
 
 patches: patches-pkgs patches-talos patches-sbcoverlay
 

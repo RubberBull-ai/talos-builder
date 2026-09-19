@@ -1,40 +1,32 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Martin Kuhn <martin@kuhn.host>
-Date: Sat, 19 Sep 2026 20:46:52 +0200
-Subject: [PATCH] u-boot: debug build, console on HDMI, interruptible autoboot
+Date: Sat, 19 Sep 2026 21:30:00 +0200
+Subject: [PATCH] u-boot: HDMI console on the Pi 5, 5 s interruptible autoboot
 
-The Pi 5 U-Boot shows nothing on HDMI with the mainline 6.18 DT: its
-HDMI node is "brcm,bcm2712-hdmi0", which the bcm2835 video driver of
-v2025.04 does not match, so no video device and no vidconsole exist
-(VIDEO, VIDEO_BCM2835, USB_KEYBOARD and the stdin/stdout/stderr env
-are already enabled). Backport upstream 812aca579140 which adds that
-compatible.
-
-Debug config on top of rpi_5_defconfig (artifacts/u-boot/debug.config):
-BOOTDELAY=5, BOOTSTD_FULL + CMD_BOOTFLOW_FULL with bootcmd
-"bootflow scan -lb" (lists each bootdev/bootflow), LOG with debug
-compiled in and info shown by default, CMD_LOG.
-
-With CMD_BOOTFLOW_FULL a bare "bootflow scan" no longer boots, so the
-PREBOOT scan becomes scan-only and the boot happens in bootcmd after
-the delay, in the same bootdev order.
+Backport upstream U-Boot 812aca579140 ("video: arm: rpi: Add
+brcm,bcm2712-hdmi0 compatible") so the bcm2835 video driver binds to the
+Pi 5 HDMI node and U-Boot's console shows up on HDMI. rpi_5_defconfig
+already has VIDEO, VIDEO_BCM2835, USB_KEYBOARD and the console env; they
+are asserted in artifacts/u-boot/extra.config together with
+BOOTDELAY=5 (default 2). Nothing here changes which bootflow U-Boot
+picks or how it boots it.
 ---
- artifacts/u-boot/debug.config                 | 31 +++++++++++++++++++
- ...pi-Add-brcm-bcm2712-hdmi0-compatible.patch | 27 ++++++++++++++++
- artifacts/u-boot/pkg.yaml                     | 12 +++++++
- 3 files changed, 70 insertions(+)
- create mode 100644 artifacts/u-boot/debug.config
+ artifacts/u-boot/extra.config                 | 14 ++++++++++
+ ...pi-Add-brcm-bcm2712-hdmi0-compatible.patch | 27 +++++++++++++++++++
+ artifacts/u-boot/pkg.yaml                     | 12 +++++++++
+ 3 files changed, 53 insertions(+)
+ create mode 100644 artifacts/u-boot/extra.config
  create mode 100644 artifacts/u-boot/patches/0001-video-arm-rpi-Add-brcm-bcm2712-hdmi0-compatible.patch
 
-diff --git a/artifacts/u-boot/debug.config b/artifacts/u-boot/debug.config
+diff --git a/artifacts/u-boot/extra.config b/artifacts/u-boot/extra.config
 new file mode 100644
-index 0000000..782bcb6
+index 0000000..ed48b3c
 --- /dev/null
-+++ b/artifacts/u-boot/debug.config
-@@ -0,0 +1,31 @@
-+# Debug build: U-Boot console on HDMI + interruptible autoboot + boot diagnostics.
-+# Appended to rpi_5_defconfig's .config, resolved with `make olddefconfig`;
++++ b/artifacts/u-boot/extra.config
+@@ -0,0 +1,14 @@
++# Appended to rpi_5_defconfig's .config and resolved with `make olddefconfig`;
 +# the build fails if any line below does not survive into the final .config.
++# Nothing here changes how U-Boot picks or boots a bootflow.
 +
 +# Console on HDMI and USB keyboard (already in rpi_5_defconfig; asserted here).
 +# rpi.env sets stdin=serial,usbkbd / stdout=serial,vidconsole / stderr=serial,vidconsole.
@@ -46,23 +38,6 @@ index 0000000..782bcb6
 +
 +# 5 s window to interrupt autoboot (default 2).
 +CONFIG_BOOTDELAY=5
-+
-+# bootflow/bootdev/bootmeth subcommands and `bootflow scan -l` (lists every
-+# bootdev/bootflow as it is scanned). With CMD_BOOTFLOW_FULL a bare
-+# `bootflow scan` only scans, it no longer boots, so:
-+# - PREBOOT's `bootflow scan` becomes scan-only (no boot before the delay),
-+# - bootcmd must say -b explicitly: `bootflow scan -lb` (same bootdev order,
-+#   boot_targets from rpi.env, just listed).
-+CONFIG_BOOTSTD_FULL=y
-+CONFIG_CMD_BOOTFLOW_FULL=y
-+CONFIG_BOOTCOMMAND="bootflow scan -lb"
-+
-+# Logging: debug messages compiled in, info shown by default (`log level 7` at the prompt for more).
-+CONFIG_LOG=y
-+CONFIG_LOG_MAX_LEVEL=7
-+CONFIG_LOG_DEFAULT_LEVEL=6
-+CONFIG_LOG_CONSOLE=y
-+CONFIG_CMD_LOG=y
 diff --git a/artifacts/u-boot/patches/0001-video-arm-rpi-Add-brcm-bcm2712-hdmi0-compatible.patch b/artifacts/u-boot/patches/0001-video-arm-rpi-Add-brcm-bcm2712-hdmi0-compatible.patch
 new file mode 100644
 index 0000000..990d88a
@@ -97,7 +72,7 @@ index 0000000..990d88a
 + #if !IS_ENABLED(CONFIG_VIDEO_DT_SIMPLEFB)
 + 	{ .compatible = "simple-framebuffer" },
 diff --git a/artifacts/u-boot/pkg.yaml b/artifacts/u-boot/pkg.yaml
-index 9d580a0..b4a1f0f 100644
+index 9d580a0..dc60638 100644
 --- a/artifacts/u-boot/pkg.yaml
 +++ b/artifacts/u-boot/pkg.yaml
 @@ -14,8 +14,20 @@ steps:
@@ -111,16 +86,13 @@ index 9d580a0..b4a1f0f 100644
        - |
          make rpi_5_defconfig
 +      - |
-+        # Debug options (HDMI console, BOOTDELAY, bootstd listing, logging).
-+        grep -v '^#' /pkg/debug.config | grep . >> .config
++        # Extra options (HDMI console asserted, BOOTDELAY).
++        grep -v '^#' /pkg/extra.config | grep . >> .config
 +        make olddefconfig
 +        # Fail if kconfig dropped or changed any requested option.
-+        grep -v '^#' /pkg/debug.config | grep . | while IFS= read -r opt; do
-+          grep -qxF "$opt" .config || { echo "debug.config: '$opt' not in final .config" >&2; exit 1; }
++        grep -v '^#' /pkg/extra.config | grep . | while IFS= read -r opt; do
++          grep -qxF "$opt" .config || { echo "extra.config: '$opt' not in final .config" >&2; exit 1; }
 +        done
      build:
        - |
          make -j $(nproc) HOSTLDLIBS_mkimage="-lssl -lcrypto" u-boot.bin
--- 
-2.51.1
-
