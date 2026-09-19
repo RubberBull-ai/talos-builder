@@ -39,14 +39,36 @@ jobs:
       - name: Prepare (checkouts & patches)
         run: make checkouts patches
 
+      # Image tags are derived from the patched checkouts (same patches =>
+      # same tag), so an image that already exists in ghcr is not rebuilt.
+      - name: Check existing images
+        id: images
+        run: |
+          make -s REGISTRY=ghcr.io REGISTRY_USERNAME=${{ env.REGISTRY_USERNAME }} image-tags | tee images.env
+          while IFS='=' read -r key ref; do
+            echo "${key}=${ref}" >> "$GITHUB_OUTPUT"
+            if crane manifest "${ref}" > /dev/null 2>&1; then exists=true; else exists=false; fi
+            echo "${key}_exists=${exists}" >> "$GITHUB_OUTPUT"
+            echo "${ref} exists: ${exists}"
+          done < images.env
+
       - name: Kernel
+        if: steps.images.outputs.kernel_exists != 'true'
         run: make REGISTRY=ghcr.io REGISTRY_USERNAME=${{ env.REGISTRY_USERNAME }} BUILD_CACHE=1 kernel
 
-      - name: Overlay  
+      - name: Overlay
+        if: steps.images.outputs.overlay_exists != 'true'
         run: make REGISTRY=ghcr.io REGISTRY_USERNAME=${{ env.REGISTRY_USERNAME }} BUILD_CACHE=1 overlay
 
-      - name: Installer
-        run: make REGISTRY=ghcr.io REGISTRY_USERNAME=${{ env.REGISTRY_USERNAME }} BUILD_CACHE=1 installer
+      - name: Installer images
+        if: steps.images.outputs.installer_marker_exists != 'true'
+        run: |
+          make REGISTRY=ghcr.io REGISTRY_USERNAME=${{ env.REGISTRY_USERNAME }} BUILD_CACHE=1 installer-images
+          marker="${{ steps.images.outputs.installer_marker }}"
+          crane tag "${{ steps.images.outputs.installer }}" "${marker##*:}"
+
+      - name: Disk image
+        run: make REGISTRY=ghcr.io REGISTRY_USERNAME=${{ env.REGISTRY_USERNAME }} disk-image
 
       - name: Release
         if: startsWith(github.ref, 'refs/tags/v')

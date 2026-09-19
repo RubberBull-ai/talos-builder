@@ -133,6 +133,13 @@ Unchanged logic (`NewAuto()` returns GRUB on arm64); modules-list hunk moved to 
   talos-initramfs,talos-imager,talos-installer-base}`, `mode=max`,
   `ignore-error=true` (a failed cache export never fails the build). Refs do
   not depend on the git tag, so re-running a tag reuses them.
+- Skip-if-exists: `make image-tags` prints the content-derived image refs;
+  CI skips Kernel / Overlay when `crane manifest` finds that exact tag, and
+  skips the installer image builds when the marker tag
+  `installer:<TALOS_TAG>-in-<hash of kernel/overlay tags, extensions, profile,
+  Makefile>` exists (TALOS_TAG alone does not cover the installer's inputs).
+  The disk image (`make disk-image`) is always written, so tag releases still
+  get `metal-arm64.raw.zst`.
 - `git am --committer-date-is-author-date` makes the patched checkout commits
   (and thus `PKGS_TAG`/`TALOS_TAG`, i.e. the kernel/installer image tags)
   identical across runs.

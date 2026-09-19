@@ -130,13 +130,24 @@ TALOS_MAKE = $(MAKE) \
 	INSTALLER_ARCH=arm64 PLATFORM=linux/arm64 \
 	IMAGER_ARGS="--overlay-name=rpi5 --overlay-image=$(REGISTRY)/$(REGISTRY_USERNAME)/sbc-raspberrypi5:$(SBCOVERLAY_TAG) --system-extension-image=$(EXTENSIONS_ISCSI) --system-extension-image=$(EXTENSIONS_TAILSCALE) --system-extension-image=$(EXTENSIONS_UTIL_LINUX)"
 
-installer:
+installer: installer-images disk-image
+
+# Builds and pushes kernel/initramfs/imager/installer-base/installer images.
+.PHONY: installer-images
+installer-images:
 	cd "$(CHECKOUTS_DIRECTORY)/talos" && \
 		$(TALOS_MAKE) CI_ARGS="$(call cache_args,talos-kernel)" kernel && \
 		$(TALOS_MAKE) CI_ARGS="$(call cache_args,talos-initramfs)" initramfs && \
 		$(TALOS_MAKE) CI_ARGS="$(call cache_args,talos-imager)" imager && \
 		$(TALOS_MAKE) CI_ARGS="$(call cache_args,talos-installer-base)" installer-base && \
-		$(TALOS_MAKE) installer && \
+		$(TALOS_MAKE) installer
+
+# Writes the metal disk image (checkouts/talos/_out/metal-arm64.raw.zst) with
+# the already pushed imager/installer images.
+.PHONY: disk-image
+disk-image:
+	cd "$(CHECKOUTS_DIRECTORY)/talos" && \
+		mkdir -p _out && \
 		sed \
 			-e 's|__BASE_INSTALLER__|$(REGISTRY)/$(REGISTRY_USERNAME)/installer:$(TALOS_TAG)|' \
 			-e 's|__OVERLAY_IMAGE__|$(REGISTRY)/$(REGISTRY_USERNAME)/sbc-raspberrypi5:$(SBCOVERLAY_TAG)|' \
@@ -145,6 +156,23 @@ installer:
 			-e 's|__EXTENSIONS_UTIL_LINUX__|$(EXTENSIONS_UTIL_LINUX)|' \
 			"$(PROFILES_DIRECTORY)/rpi5-metal.yaml" \
 		| docker run --rm -i -v ./_out:/out -v /dev:/dev --privileged $(REGISTRY)/$(REGISTRY_USERNAME)/imager:$(TALOS_TAG) -
+
+
+
+#
+# Image tags (content-derived from the patched checkouts), for CI skip checks.
+# TALOS_TAG alone does not cover what goes into the installer (kernel,
+# overlay, extensions, profile, this Makefile), so CI marks a finished
+# installer build with an extra `<TALOS_TAG>-in-<hash of those inputs>` tag.
+#
+INSTALLER_INPUTS_HASH = $(shell (echo "$(PKGS_TAG) $(SBCOVERLAY_TAG) $(EXTENSIONS_ISCSI) $(EXTENSIONS_TAILSCALE) $(EXTENSIONS_UTIL_LINUX)"; cat "$(PROFILES_DIRECTORY)/rpi5-metal.yaml" "$(firstword $(MAKEFILE_LIST))") | git hash-object --stdin | cut -c1-12)
+
+.PHONY: image-tags
+image-tags:
+	@echo "kernel=$(REGISTRY)/$(REGISTRY_USERNAME)/kernel:$(PKGS_TAG)"
+	@echo "overlay=$(REGISTRY)/$(REGISTRY_USERNAME)/sbc-raspberrypi5:$(SBCOVERLAY_TAG)"
+	@echo "installer=$(REGISTRY)/$(REGISTRY_USERNAME)/installer:$(TALOS_TAG)"
+	@echo "installer_marker=$(REGISTRY)/$(REGISTRY_USERNAME)/installer:$(TALOS_TAG)-in-$(INSTALLER_INPUTS_HASH)"
 
 
 
