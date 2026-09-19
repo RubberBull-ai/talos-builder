@@ -124,6 +124,14 @@ Unchanged logic (`NewAuto()` returns GRUB on arm64); modules-list hunk moved to 
 - Runs on Ubicloud `ubicloud-standard-60-arm` (repo moved to the RubberBull-ai org).
 - Images go to `ghcr.io/<lowercased repo owner>/...` = `ghcr.io/rubberbull-ai/...`
   (installer release tag: `ghcr.io/rubberbull-ai/installer:v1.14.1-rpi5`).
+- buildx registry layer cache (`BUILD_CACHE=1` in CI): one ref per target in
+  `ghcr.io/rubberbull-ai/talos-builder-cache:{kernel,overlay,talos-kernel,
+  talos-initramfs,talos-imager,talos-installer-base}`, `mode=max`,
+  `ignore-error=true` (a failed cache export never fails the build). Refs do
+  not depend on the git tag, so re-running a tag reuses them.
+- `git am --committer-date-is-author-date` makes the patched checkout commits
+  (and thus `PKGS_TAG`/`TALOS_TAG`, i.e. the kernel/installer image tags)
+  identical across runs.
 
 ## Open TODOs
 

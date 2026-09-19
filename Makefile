@@ -24,6 +24,14 @@ PKG_REPOSITORY = https://github.com/siderolabs/pkgs.git
 TALOS_REPOSITORY = https://github.com/siderolabs/talos.git
 SBCOVERLAY_REPOSITORY = https://github.com/talos-rpi5/sbc-raspberrypi5.git
 
+# Optional buildx registry layer cache (CI sets BUILD_CACHE=1). One ref per
+# build target, independent of git tags, so re-runs of the same inputs
+# (e.g. re-pushing a release tag) skip the unchanged stages.
+BUILD_CACHE ?=
+CACHE_REPOSITORY ?= $(REGISTRY)/$(REGISTRY_USERNAME)/talos-builder-cache
+comma := ,
+cache_args = $(if $(BUILD_CACHE),--cache-from=type=registry$(comma)ref=$(CACHE_REPOSITORY):$(1) --cache-to=type=registry$(comma)ref=$(CACHE_REPOSITORY):$(1)$(comma)mode=max$(comma)image-manifest=true$(comma)oci-mediatypes=true$(comma)ignore-error=true)
+
 CHECKOUTS_DIRECTORY := $(PWD)/checkouts
 PATCHES_DIRECTORY := $(PWD)/patches
 PROFILES_DIRECTORY := $(PWD)/profiles
@@ -70,13 +78,13 @@ checkouts-clean:
 .PHONY: patches-pkgs patches-talos patches
 patches-pkgs:
 	cd "$(CHECKOUTS_DIRECTORY)/pkgs" && \
-		git am "$(PATCHES_DIRECTORY)/siderolabs/pkgs/0001-Patched-for-Raspberry-Pi-5.patch"
+		git am --committer-date-is-author-date "$(PATCHES_DIRECTORY)/siderolabs/pkgs/0001-Patched-for-Raspberry-Pi-5.patch"
 
 patches-talos:
 	cd "$(CHECKOUTS_DIRECTORY)/talos" && \
-		git am "$(PATCHES_DIRECTORY)/siderolabs/talos/0001-Patched-for-Raspberry-Pi-5.patch" && \
-		git am "$(PATCHES_DIRECTORY)/siderolabs/talos/0002-Skip-NVRAM-writes-for-GRUB-on-arm64.patch" && \
-		git am "$(PATCHES_DIRECTORY)/siderolabs/talos/0003-Force-GRUB-bootloader-on-arm64.patch"
+		git am --committer-date-is-author-date "$(PATCHES_DIRECTORY)/siderolabs/talos/0001-Patched-for-Raspberry-Pi-5.patch" && \
+		git am --committer-date-is-author-date "$(PATCHES_DIRECTORY)/siderolabs/talos/0002-Skip-NVRAM-writes-for-GRUB-on-arm64.patch" && \
+		git am --committer-date-is-author-date "$(PATCHES_DIRECTORY)/siderolabs/talos/0003-Force-GRUB-bootloader-on-arm64.patch"
 
 patches: patches-pkgs patches-talos
 
@@ -91,6 +99,7 @@ kernel:
 		$(MAKE) \
 			REGISTRY=$(REGISTRY) USERNAME=$(REGISTRY_USERNAME) PUSH=true \
 			PLATFORM=linux/arm64 \
+			CI_ARGS="$(call cache_args,kernel)" \
 			kernel
 
 
@@ -106,6 +115,7 @@ overlay:
 			REGISTRY=$(REGISTRY) USERNAME=$(REGISTRY_USERNAME) IMAGE_TAG=$(SBCOVERLAY_TAG) PUSH=true \
 			PKGS_PREFIX=$(REGISTRY)/$(REGISTRY_USERNAME) PKGS=$(PKGS_TAG) \
 			INSTALLER_ARCH=arm64 PLATFORM=linux/arm64 \
+			CI_ARGS="$(call cache_args,overlay)" \
 			sbc-raspberrypi5
 
 
@@ -114,14 +124,19 @@ overlay:
 # Installer/Image
 #
 .PHONY: installer
+TALOS_MAKE = $(MAKE) \
+	REGISTRY=$(REGISTRY) USERNAME=$(REGISTRY_USERNAME) PUSH=true \
+	PKG_KERNEL=$(REGISTRY)/$(REGISTRY_USERNAME)/kernel:$(PKGS_TAG) \
+	INSTALLER_ARCH=arm64 PLATFORM=linux/arm64 \
+	IMAGER_ARGS="--overlay-name=rpi5 --overlay-image=$(REGISTRY)/$(REGISTRY_USERNAME)/sbc-raspberrypi5:$(SBCOVERLAY_TAG) --system-extension-image=$(EXTENSIONS_ISCSI) --system-extension-image=$(EXTENSIONS_TAILSCALE) --system-extension-image=$(EXTENSIONS_UTIL_LINUX)"
+
 installer:
 	cd "$(CHECKOUTS_DIRECTORY)/talos" && \
-		$(MAKE) \
-			REGISTRY=$(REGISTRY) USERNAME=$(REGISTRY_USERNAME) PUSH=true \
-			PKG_KERNEL=$(REGISTRY)/$(REGISTRY_USERNAME)/kernel:$(PKGS_TAG) \
-			INSTALLER_ARCH=arm64 PLATFORM=linux/arm64 \
-			IMAGER_ARGS="--overlay-name=rpi5 --overlay-image=$(REGISTRY)/$(REGISTRY_USERNAME)/sbc-raspberrypi5:$(SBCOVERLAY_TAG) --system-extension-image=$(EXTENSIONS_ISCSI) --system-extension-image=$(EXTENSIONS_TAILSCALE) --system-extension-image=$(EXTENSIONS_UTIL_LINUX)" \
-			kernel initramfs imager installer-base installer && \
+		$(TALOS_MAKE) CI_ARGS="$(call cache_args,talos-kernel)" kernel && \
+		$(TALOS_MAKE) CI_ARGS="$(call cache_args,talos-initramfs)" initramfs && \
+		$(TALOS_MAKE) CI_ARGS="$(call cache_args,talos-imager)" imager && \
+		$(TALOS_MAKE) CI_ARGS="$(call cache_args,talos-installer-base)" installer-base && \
+		$(TALOS_MAKE) installer && \
 		sed \
 			-e 's|__BASE_INSTALLER__|$(REGISTRY)/$(REGISTRY_USERNAME)/installer:$(TALOS_TAG)|' \
 			-e 's|__OVERLAY_IMAGE__|$(REGISTRY)/$(REGISTRY_USERNAME)/sbc-raspberrypi5:$(SBCOVERLAY_TAG)|' \

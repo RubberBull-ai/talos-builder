@@ -40,13 +40,13 @@ jobs:
         run: make checkouts patches
 
       - name: Kernel
-        run: make REGISTRY=ghcr.io REGISTRY_USERNAME=${{ env.REGISTRY_USERNAME }} kernel
+        run: make REGISTRY=ghcr.io REGISTRY_USERNAME=${{ env.REGISTRY_USERNAME }} BUILD_CACHE=1 kernel
 
       - name: Overlay  
-        run: make REGISTRY=ghcr.io REGISTRY_USERNAME=${{ env.REGISTRY_USERNAME }} overlay
+        run: make REGISTRY=ghcr.io REGISTRY_USERNAME=${{ env.REGISTRY_USERNAME }} BUILD_CACHE=1 overlay
 
       - name: Installer
-        run: make REGISTRY=ghcr.io REGISTRY_USERNAME=${{ env.REGISTRY_USERNAME }} installer
+        run: make REGISTRY=ghcr.io REGISTRY_USERNAME=${{ env.REGISTRY_USERNAME }} BUILD_CACHE=1 installer
 
       - name: Release
         if: startsWith(github.ref, 'refs/tags/v')
