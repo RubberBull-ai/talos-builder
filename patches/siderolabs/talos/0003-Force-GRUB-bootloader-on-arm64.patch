@@ -1,4 +1,4 @@
-From b2e9f19a16911953d41991855a0e65ff9bb0eba5 Mon Sep 17 00:00:00 2001
+From 350c36c2029deefe6ca728c78f7daa3d4414e451 Mon Sep 17 00:00:00 2001
 From: Martin Kuhn <martin@kuhn.host>
 Date: Sat, 31 Jan 2026 12:32:26 +0100
 Subject: [PATCH 3/3] Force GRUB bootloader on arm64
@@ -11,63 +11,11 @@ trying to write EFI variables during installation.
 Force GRUB on arm64 since it works correctly with the --no-nvram
 flag (patched separately) and arm64-efi systems boot by convention.
 ---
- hack/modules-arm64.txt                                 | 10 ----------
- .../pkg/runtime/v1alpha1/bootloader/bootloader.go      |  5 +++++
- 2 files changed, 5 insertions(+), 10 deletions(-)
+ .../machined/pkg/runtime/v1alpha1/bootloader/bootloader.go   | 5 +++++
+ 1 file changed, 5 insertions(+)
 
-diff --git a/hack/modules-arm64.txt b/hack/modules-arm64.txt
-index dc3c5f9bd..5e9655fbc 100644
---- a/hack/modules-arm64.txt
-+++ b/hack/modules-arm64.txt
-@@ -28,10 +28,8 @@ kernel/drivers/crypto/tegra/tegra-se.ko
- kernel/drivers/dma/bcm-sba-raid.ko
- kernel/drivers/gpu/drm/amd/amdgpu/amdgpu.ko
- kernel/drivers/gpu/drm/amd/amdxcp/amdxcp.ko
--kernel/drivers/gpu/drm/display/drm_dp_aux_bus.ko
- kernel/drivers/gpu/drm/drm_buddy.ko
- kernel/drivers/gpu/drm/drm_exec.ko
--kernel/drivers/gpu/drm/drm_gpuvm.ko
- kernel/drivers/gpu/drm/drm_panel_backlight_quirks.ko
- kernel/drivers/gpu/drm/drm_suballoc_helper.ko
- kernel/drivers/gpu/drm/drm_ttm_helper.ko
-@@ -72,8 +70,6 @@ kernel/drivers/media/mc/mc.ko
- kernel/drivers/media/usb/uvc/uvcvideo.ko
- kernel/drivers/media/v4l2-core/v4l2-dv-timings.ko
- kernel/drivers/media/v4l2-core/videodev.ko
--kernel/drivers/misc/bcm2835_smi.ko
--kernel/drivers/mmc/host/sdhci-uhs2.ko
- kernel/drivers/net/ethernet/amazon/ena/ena.ko
- kernel/drivers/net/ethernet/atheros/alx/alx.ko
- kernel/drivers/net/ethernet/chelsio/cxgb/cxgb.ko
-@@ -94,10 +90,6 @@ kernel/drivers/net/ethernet/hisilicon/hns3/hclgevf.ko
- kernel/drivers/net/ethernet/hisilicon/hns3/hnae3.ko
- kernel/drivers/net/ethernet/hisilicon/hns3/hns3.ko
- kernel/drivers/net/ethernet/hisilicon/hns_mdio.ko
--kernel/drivers/net/ethernet/intel/idpf/idpf.ko
--kernel/drivers/net/ethernet/intel/libeth/libeth_xdp.ko
--kernel/drivers/net/ethernet/intel/libie/libie_adminq.ko
--kernel/drivers/net/ethernet/intel/libie/libie_fwlog.ko
- kernel/drivers/net/ethernet/mellanox/mlx4/mlx4_core.ko
- kernel/drivers/net/ethernet/mellanox/mlx4/mlx4_en.ko
- kernel/drivers/net/ethernet/mellanox/mlx5/core/mlx5_core.ko
-@@ -109,7 +101,6 @@ kernel/drivers/net/ethernet/mellanox/mlxsw/mlxsw_pci.ko
- kernel/drivers/net/ethernet/mellanox/mlxsw/mlxsw_spectrum.ko
- kernel/drivers/net/ethernet/sfc/sfc.ko
- kernel/drivers/net/ethernet/sfc/siena/sfc-siena.ko
--kernel/drivers/net/ethernet/stmicro/stmmac/dwmac-meson8b.ko
- kernel/drivers/net/ethernet/stmicro/stmmac/dwmac-renesas-gbeth.ko
- kernel/drivers/net/mdio/mdio-mux-meson-gxl.ko
- kernel/drivers/net/phy/ax88796b.ko
-@@ -170,7 +161,6 @@ kernel/drivers/scsi/hisi_sas/hisi_sas_v3_hw.ko
- kernel/drivers/scsi/libfc/libfc.ko
- kernel/drivers/scsi/lpfc/lpfc.ko
- kernel/drivers/scsi/mpi3mr/mpi3mr.ko
--kernel/drivers/scsi/mpt3sas/mpt3sas.ko
- kernel/drivers/scsi/qedf/qedf.ko
- kernel/drivers/scsi/qla2xxx/qla2xxx.ko
- kernel/drivers/thunderbolt/thunderbolt.ko
 diff --git a/internal/app/machined/pkg/runtime/v1alpha1/bootloader/bootloader.go b/internal/app/machined/pkg/runtime/v1alpha1/bootloader/bootloader.go
-index f084e0911..5c388c108 100644
+index 39f79ecf0..19221f66e 100644
 --- a/internal/app/machined/pkg/runtime/v1alpha1/bootloader/bootloader.go
 +++ b/internal/app/machined/pkg/runtime/v1alpha1/bootloader/bootloader.go
 @@ -8,6 +8,7 @@ package bootloader
@@ -78,7 +26,7 @@ index f084e0911..5c388c108 100644
  
  	"github.com/siderolabs/go-blockdevice/v2/block"
  	"github.com/siderolabs/go-blockdevice/v2/partitioning/gpt"
-@@ -73,6 +74,10 @@ func Probe(disk string, options options.ProbeOptions) (Bootloader, error) {
+@@ -82,6 +83,10 @@ func Probe(disk string, options options.ProbeOptions) (Bootloader, error) {
  
  // NewAuto returns a new bootloader based on auto-detection.
  func NewAuto() Bootloader {

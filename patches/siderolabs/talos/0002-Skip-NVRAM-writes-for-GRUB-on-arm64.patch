@@ -1,4 +1,4 @@
-From 48413dd9b213532e7551432501d0313d30368933 Mon Sep 17 00:00:00 2001
+From 5dab172b65a9a476107753eaddb3ffb68af6080a Mon Sep 17 00:00:00 2001
 From: Martin Kuhn <martin@kuhn.host>
 Date: Sat, 31 Jan 2026 12:12:13 +0100
 Subject: [PATCH 2/3] Skip NVRAM writes for GRUB on arm64
@@ -15,10 +15,10 @@ PXE installs and rolling upgrades to succeed.
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/internal/app/machined/pkg/runtime/v1alpha1/bootloader/grub/install.go b/internal/app/machined/pkg/runtime/v1alpha1/bootloader/grub/install.go
-index 6f5c9f80a..766374b3e 100644
+index df7a42a59..11609549e 100644
 --- a/internal/app/machined/pkg/runtime/v1alpha1/bootloader/grub/install.go
 +++ b/internal/app/machined/pkg/runtime/v1alpha1/bootloader/grub/install.go
-@@ -196,7 +196,7 @@ func (c *Config) install(opts options.InstallOptions) (*options.InstallResult, e
+@@ -331,7 +331,7 @@ func (c *Config) runGrubInstall(ctx context.Context, opts options.InstallOptions
  			args = append(args, "--efi-directory="+filepath.Join(opts.MountPrefix, constants.EFIMountPoint))
  		}
  
