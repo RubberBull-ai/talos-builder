@@ -1,3 +1,71 @@
+# talos-builder v1.12.12 (intermediate upgrade step)
+
+Branch: `talos_v_1-12` (based on `talos_v_1-14-1` at 93b4786, so all the
+v1.14.1 boot fixes below carry over). Release tag: `v1.12.12-rpi5`.
+
+## Why
+
+The Pis run custom v1.11.5 (`ghcr.io/upmkuhn/installer:v1.11.5.2`). The
+v1.14.1 installer refuses them: `compatibility/talos114`
+`MinimumHostUpgradeVersion = 1.12.0`. To keep the NVMe data the upgrade goes
+**1.11.5 -> v1.12.12-rpi5 -> v1.14.1-rpi5**, both in place.
+
+Checked in the Talos sources (the installer pre-flight compares only
+major.minor.patch, the `-3-g...` suffix of our builds is ignored):
+
+| installer | MinimumHostUpgradeVersion | MaximumHostDowngradeVersion (excl.) | host | ok |
+|---|---|---|---|---|
+| v1.12.12 (`talos112`) | 1.10.0 | 1.14.0 | 1.11.5 | yes |
+| v1.14.1 (`talos114`) | 1.12.0 | 1.16.0 | 1.12.12 | yes |
+
+Kubernetes support (not checked by the installer, but by config
+validation / `upgrade-k8s`): Talos 1.12 = 1.30-1.35, Talos 1.14 = 1.32-1.37;
+prod-on-prem runs 1.34 (talos repo `KUBERNETES_VERSION`), inside both.
+
+## Versions
+
+| Component | v1.12.12 (this branch) |
+|-----------|------------------------|
+| Talos | v1.12.12 |
+| Pkgs | `5eb9201` (`v1.12.0-113-g5eb9201`, release-1.12) |
+| Kernel | upstream 6.18.49 (gcc 15), macb TX-stall fixes 0001-0003 + PCI 0004 (no EEE backport) |
+| SBC overlay / U-Boot | talos-rpi5/sbc-raspberrypi5 `main` + our patches 0001-0003 / talos-rpi5/u-boot v2025.04-rpi5-3 (as v1.14.1) |
+| Bootloader | GRUB (forced on arm64) |
+| iscsi-tools / tailscale / util-linux-tools | v0.2.0 / 1.94.2 / 2.41.4 (siderolabs/extensions v1.12.12) |
+
+## Patches
+
+- `pkgs/0001` (config-arm64): the v1.14.1 patch rebased onto pkgs 5eb9201.
+  Three conflicts, all symbols upstream 1.14 had changed and the patch never
+  touched: kept the 1.12 upstream values (`XEN_NETDEV_FRONTEND=y`,
+  `HID_REDRAGON=y`, `HID_MULTITOUCH` off, `INFINIBAND=y`) plus the patch's
+  own changes (`VMXNET3=y`, `HID_MICROSOFT=y`, `HID_MONTEREY=y`, IB
+  USER_MAD/USER_ACCESS off). Every one of the 157 symbols the v1.14.1 patch
+  changes has the same value here, and it changes nothing else.
+  `make olddefconfig` on 6.18.49 (gcc 15) keeps RP1/MACB/PCIE_BRCMSTB/
+  BCM2712_MIP/NVMe built in; it only moves toolchain-dependent symbols and
+  16K-page consequences (as with v1.14.1).
+- `talos/0001` (modules-arm64.txt): upstream v1.12.12 list with the same
+  removals/additions as the v1.14.1 patch (+ `cdc-phonet.ko`, PHONET is on in
+  1.12). Checked against the CI-built kernel, see below.
+- `talos/0002`, `talos/0003`: unchanged logic, apply cleanly.
+- Overlay patches: unchanged (same overlay/U-Boot sources as v1.14.1).
+
+## Upgrade over the v1.11.5.2 disk layout
+
+EFI (100 MiB vfat), BIOS, BOOT (xfs, GRUB), META, STATE, EPHEMERAL,
+u-longhorn. In upgrade mode the v1.12.12 installer does not touch the
+partition table (only checks it is GPT), probes GRUB on BOOT, writes the new
+kernel/initramfs to the other BOOT slot, rewrites grub.cfg, runs
+`grub-install --target=arm64-efi --removable --no-nvram` (patch 0002) into
+EFI and then the overlay installer, which copies `firmware/boot` + `u-boot.bin`
++ `config.txt` into EFI. Partitions are found by label, so u-longhorn is
+irrelevant. The overlay payload is ~3.3 MB (2.6 MB firmware/boot incl.
+1.9 MB `overlays/`, 0.7 MB U-Boot, DTBs 80 KB each; measured on the v1.14.1
+overlay image), plus GRUB's BOOTAA64.EFI: far below 100 MiB.
+
+---
+
 # talos-builder v1.14.1 Upgrade
 
 Branch: `talos_v_1-14-1` (based on `talos_v_1-12-2`, see the v1.12.2 section below)

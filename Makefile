@@ -1,10 +1,12 @@
-# siderolabs/pkgs has no v1.14.1 tag: Talos v1.14.1 is built against pkgs
-# v1.14.0-25-gf694e1b (pkg/machinery/gendata/data/pkgs at talos tag v1.14.1),
-# i.e. commit f694e1b on release-1.14. Pin that exact commit so our kernel
-# carries the same patches (incl. the RP1/macb TX-stall fixes) as the
-# upstream v1.14.1 kernel. `git describe` of it yields v1.14.0-25-gf694e1b.
-PKG_VERSION = f694e1bfb5c5bedd69b030ef00e9784986e64de3
-TALOS_VERSION = v1.14.1
+# Intermediate v1.12 build: the Pis run 1.11.5, and the 1.14 installer only
+# upgrades hosts >= 1.12.0 (compatibility/talos114), so they go 1.11.5 ->
+# 1.12.12 -> 1.14.1 in place. siderolabs/pkgs has no v1.12.12 tag: Talos
+# v1.12.12 is built against pkgs v1.12.0-113-g5eb9201
+# (pkg/machinery/gendata/data/pkgs at talos tag v1.12.12), i.e. commit 5eb9201
+# on release-1.12 (Linux 6.18.49, with the RP1/macb TX-stall fixes). Pin that
+# exact commit so our kernel carries the same patches as the stock v1.12.12 one.
+PKG_VERSION = 5eb92010829a064d8df326316978f24c3dcd334e
+TALOS_VERSION = v1.12.12
 # talos-rpi5 overlay fork: its U-Boot (talos-rpi5/u-boot v2025.04-rpi5-3) has
 # the BCM2712 PCIe driver needed to boot from NVMe. The upstream
 # siderolabs/sbc-raspberrypi rpi_5 overlay cannot (sbc-raspberrypi#81, #88).
@@ -15,10 +17,10 @@ REGISTRY_USERNAME ?= talos-rpi5
 
 TAG ?= $(shell git describe --tags --exact-match)
 
-# Extension versions as shipped for Talos v1.14.1 (siderolabs/extensions v1.14.1)
+# Extension versions as shipped for Talos v1.12.12 (siderolabs/extensions v1.12.12)
 EXTENSIONS_ISCSI ?= ghcr.io/siderolabs/iscsi-tools:v0.2.0
-EXTENSIONS_TAILSCALE ?= ghcr.io/siderolabs/tailscale:1.102.3
-EXTENSIONS_UTIL_LINUX ?= ghcr.io/siderolabs/util-linux-tools:2.42.2
+EXTENSIONS_TAILSCALE ?= ghcr.io/siderolabs/tailscale:1.94.2
+EXTENSIONS_UTIL_LINUX ?= ghcr.io/siderolabs/util-linux-tools:2.41.4
 
 PKG_REPOSITORY = https://github.com/siderolabs/pkgs.git
 TALOS_REPOSITORY = https://github.com/siderolabs/talos.git

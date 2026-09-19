@@ -1,4 +1,4 @@
-From 2844e1adefba6994f1e520211fcb01b386297b57 Mon Sep 17 00:00:00 2001
+From d6b4090a965c4f466cbb87faa0c256b6c7403a98 Mon Sep 17 00:00:00 2001
 From: Martin Kuhn <martin@kuhn.host>
 Date: Sat, 31 Jan 2026 12:32:26 +0100
 Subject: [PATCH 3/3] Force GRUB bootloader on arm64
@@ -15,7 +15,7 @@ flag (patched separately) and arm64-efi systems boot by convention.
  1 file changed, 5 insertions(+)
 
 diff --git a/internal/app/machined/pkg/runtime/v1alpha1/bootloader/bootloader.go b/internal/app/machined/pkg/runtime/v1alpha1/bootloader/bootloader.go
-index 39f79ecf0..19221f66e 100644
+index f084e0911..5c388c108 100644
 --- a/internal/app/machined/pkg/runtime/v1alpha1/bootloader/bootloader.go
 +++ b/internal/app/machined/pkg/runtime/v1alpha1/bootloader/bootloader.go
 @@ -8,6 +8,7 @@ package bootloader
@@ -26,7 +26,7 @@ index 39f79ecf0..19221f66e 100644
  
  	"github.com/siderolabs/go-blockdevice/v2/block"
  	"github.com/siderolabs/go-blockdevice/v2/partitioning/gpt"
-@@ -82,6 +83,10 @@ func Probe(disk string, options options.ProbeOptions) (Bootloader, error) {
+@@ -73,6 +74,10 @@ func Probe(disk string, options options.ProbeOptions) (Bootloader, error) {
  
  // NewAuto returns a new bootloader based on auto-detection.
  func NewAuto() Bootloader {
