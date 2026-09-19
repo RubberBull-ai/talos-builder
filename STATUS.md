@@ -128,11 +128,14 @@ Unchanged logic (`NewAuto()` returns GRUB on arm64); modules-list hunk moved to 
 - Runs on Ubicloud `ubicloud-standard-60-arm` (repo moved to the RubberBull-ai org).
 - Images go to `ghcr.io/<lowercased repo owner>/...` = `ghcr.io/rubberbull-ai/...`
   (installer release tag: `ghcr.io/rubberbull-ai/installer:v1.14.1-rpi5`).
-- buildx registry layer cache (`BUILD_CACHE=1` in CI): one ref per target in
-  `ghcr.io/rubberbull-ai/talos-builder-cache:{kernel,overlay,talos-kernel,
-  talos-initramfs,talos-imager,talos-installer-base}`, `mode=max`,
-  `ignore-error=true` (a failed cache export never fails the build). Refs do
-  not depend on the git tag, so re-running a tag reuses them.
+- No buildx registry layer cache: a `mode=max` registry cache made the kernel
+  step slower (67 min vs 49 min uncached, the kernel build tree is huge) and
+  was dropped; `mode=min` would not hit through the multi-stage `COPY --from`
+  chains. Unchanged images are skipped instead (below).
+- ghcr packages are private in the org. The imager runs in its own container
+  without the runner's docker login, so the installer and disk-image steps
+  pass `GITHUB_TOKEN` (Talos' imager authenticates ghcr.io with it via the
+  go-containerregistry GitHub keychain).
 - Skip-if-exists: `make image-tags` prints the content-derived image refs;
   CI skips Kernel / Overlay when `crane manifest` finds that exact tag, and
   skips the installer image builds when the marker tag

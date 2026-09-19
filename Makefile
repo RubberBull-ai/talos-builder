@@ -24,14 +24,6 @@ PKG_REPOSITORY = https://github.com/siderolabs/pkgs.git
 TALOS_REPOSITORY = https://github.com/siderolabs/talos.git
 SBCOVERLAY_REPOSITORY = https://github.com/talos-rpi5/sbc-raspberrypi5.git
 
-# Optional buildx registry layer cache (CI sets BUILD_CACHE=1). One ref per
-# build target, independent of git tags, so re-runs of the same inputs
-# (e.g. re-pushing a release tag) skip the unchanged stages.
-BUILD_CACHE ?=
-CACHE_REPOSITORY ?= $(REGISTRY)/$(REGISTRY_USERNAME)/talos-builder-cache
-comma := ,
-cache_args = $(if $(BUILD_CACHE),--cache-from=type=registry$(comma)ref=$(CACHE_REPOSITORY):$(1) --cache-to=type=registry$(comma)ref=$(CACHE_REPOSITORY):$(1)$(comma)mode=max$(comma)image-manifest=true$(comma)oci-mediatypes=true$(comma)ignore-error=true)
-
 CHECKOUTS_DIRECTORY := $(PWD)/checkouts
 PATCHES_DIRECTORY := $(PWD)/patches
 PROFILES_DIRECTORY := $(PWD)/profiles
@@ -99,7 +91,6 @@ kernel:
 		$(MAKE) \
 			REGISTRY=$(REGISTRY) USERNAME=$(REGISTRY_USERNAME) PUSH=true \
 			PLATFORM=linux/arm64 \
-			CI_ARGS="$(call cache_args,kernel)" \
 			kernel
 
 
@@ -115,7 +106,6 @@ overlay:
 			REGISTRY=$(REGISTRY) USERNAME=$(REGISTRY_USERNAME) IMAGE_TAG=$(SBCOVERLAY_TAG) PUSH=true \
 			PKGS_PREFIX=$(REGISTRY)/$(REGISTRY_USERNAME) PKGS=$(PKGS_TAG) \
 			INSTALLER_ARCH=arm64 PLATFORM=linux/arm64 \
-			CI_ARGS="$(call cache_args,overlay)" \
 			sbc-raspberrypi5
 
 
@@ -136,14 +126,15 @@ installer: installer-images disk-image
 .PHONY: installer-images
 installer-images:
 	cd "$(CHECKOUTS_DIRECTORY)/talos" && \
-		$(TALOS_MAKE) CI_ARGS="$(call cache_args,talos-kernel)" kernel && \
-		$(TALOS_MAKE) CI_ARGS="$(call cache_args,talos-initramfs)" initramfs && \
-		$(TALOS_MAKE) CI_ARGS="$(call cache_args,talos-imager)" imager && \
-		$(TALOS_MAKE) CI_ARGS="$(call cache_args,talos-installer-base)" installer-base && \
+		$(TALOS_MAKE) kernel && \
+		$(TALOS_MAKE) initramfs && \
+		$(TALOS_MAKE) imager && \
+		$(TALOS_MAKE) installer-base && \
 		$(TALOS_MAKE) installer
 
 # Writes the metal disk image (checkouts/talos/_out/metal-arm64.raw.zst) with
-# the already pushed imager/installer images.
+# the already pushed imager/installer images. GITHUB_TOKEN (if set) lets the
+# imager pull private ghcr.io images (installer base, overlay).
 .PHONY: disk-image
 disk-image:
 	cd "$(CHECKOUTS_DIRECTORY)/talos" && \
@@ -155,7 +146,7 @@ disk-image:
 			-e 's|__EXTENSIONS_TAILSCALE__|$(EXTENSIONS_TAILSCALE)|' \
 			-e 's|__EXTENSIONS_UTIL_LINUX__|$(EXTENSIONS_UTIL_LINUX)|' \
 			"$(PROFILES_DIRECTORY)/rpi5-metal.yaml" \
-		| docker run --rm -i -v ./_out:/out -v /dev:/dev --privileged $(REGISTRY)/$(REGISTRY_USERNAME)/imager:$(TALOS_TAG) -
+		| docker run --rm -i -e GITHUB_TOKEN -v ./_out:/out -v /dev:/dev --privileged $(REGISTRY)/$(REGISTRY_USERNAME)/imager:$(TALOS_TAG) -
 
 
 

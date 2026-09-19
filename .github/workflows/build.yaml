@@ -54,20 +54,26 @@ jobs:
 
       - name: Kernel
         if: steps.images.outputs.kernel_exists != 'true'
-        run: make REGISTRY=ghcr.io REGISTRY_USERNAME=${{ env.REGISTRY_USERNAME }} BUILD_CACHE=1 kernel
+        run: make REGISTRY=ghcr.io REGISTRY_USERNAME=${{ env.REGISTRY_USERNAME }} kernel
 
       - name: Overlay
         if: steps.images.outputs.overlay_exists != 'true'
-        run: make REGISTRY=ghcr.io REGISTRY_USERNAME=${{ env.REGISTRY_USERNAME }} BUILD_CACHE=1 overlay
+        run: make REGISTRY=ghcr.io REGISTRY_USERNAME=${{ env.REGISTRY_USERNAME }} overlay
 
+      # The imager runs in a container without the runner's docker login; it
+      # authenticates to ghcr.io with GITHUB_TOKEN (images are private).
       - name: Installer images
         if: steps.images.outputs.installer_marker_exists != 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          make REGISTRY=ghcr.io REGISTRY_USERNAME=${{ env.REGISTRY_USERNAME }} BUILD_CACHE=1 installer-images
+          make REGISTRY=ghcr.io REGISTRY_USERNAME=${{ env.REGISTRY_USERNAME }} installer-images
           marker="${{ steps.images.outputs.installer_marker }}"
           crane tag "${{ steps.images.outputs.installer }}" "${marker##*:}"
 
       - name: Disk image
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: make REGISTRY=ghcr.io REGISTRY_USERNAME=${{ env.REGISTRY_USERNAME }} disk-image
 
       - name: Release
