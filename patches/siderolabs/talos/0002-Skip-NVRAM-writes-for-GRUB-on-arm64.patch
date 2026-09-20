@@ -1,7 +1,7 @@
-From 2e0ce2789f93b64890d1a9624965bcd85a38d61a Mon Sep 17 00:00:00 2001
+From 6cc91581389a83e20ecb0d0ca2a2816c8bd556e2 Mon Sep 17 00:00:00 2001
 From: Martin Kuhn <martin@kuhn.host>
-Date: Sat, 31 Jan 2026 00:49:27 +0100
-Subject: [PATCH] Skip NVRAM writes for GRUB on arm64
+Date: Sat, 31 Jan 2026 12:12:13 +0100
+Subject: [PATCH 2/3] Skip NVRAM writes for GRUB on arm64
 
 On arm64 platforms like RPi5, the firmware does not support EFI runtime
 SetVariable, causing grub-install to fail when efibootmgr tries to
@@ -15,10 +15,10 @@ PXE installs and rolling upgrades to succeed.
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/internal/app/machined/pkg/runtime/v1alpha1/bootloader/grub/install.go b/internal/app/machined/pkg/runtime/v1alpha1/bootloader/grub/install.go
-index 2597d721a..597a47400 100644
+index df7a42a59..11609549e 100644
 --- a/internal/app/machined/pkg/runtime/v1alpha1/bootloader/grub/install.go
 +++ b/internal/app/machined/pkg/runtime/v1alpha1/bootloader/grub/install.go
-@@ -173,7 +173,7 @@ func (c *Config) install(opts options.InstallOptions) (*options.InstallResult, e
+@@ -331,7 +331,7 @@ func (c *Config) runGrubInstall(ctx context.Context, opts options.InstallOptions
  			args = append(args, "--efi-directory="+filepath.Join(opts.MountPrefix, constants.EFIMountPoint))
  		}
  

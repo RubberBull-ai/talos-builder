@@ -1,0 +1,67 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Martin Kuhn <martin@kuhn.host>
+Date: Sat, 19 Sep 2026 21:50:00 +0200
+Subject: [PATCH] rpi5: fork DTs for firmware/U-Boot, mainline DTs for the
+ kernel; HDMI console last
+
+The boot partition shipped the kernel's mainline bcm2712 DTs at its root,
+where the firmware picks the DT it hands to U-Boot. U-Boot does not come
+up with the mainline DT (no HDMI, no network, reset after ~46 s); the
+6.18 kernel in turn has no Ethernet with the downstream DT.
+
+- partition root: the downstream DTs of the pinned firmware release
+  (bcm2712-rpi-5-b.dtb, bcm2712d0-rpi-5-b.dtb, ...), matching overlays/
+  (overlay_map.dtb, disable-bt-pi5/disable-wifi-pi5.dtbo). Byte-identical
+  to what the v1.11.5.2 build shipped.
+- dtb/broadcom/: the kernel's mainline DTs, which U-Boot's EFI boot loads
+  as ${fdtfile} and hands to the kernel.
+
+Kernel args: console=ttyAMA10,115200 (Pi 5 debug UART with the mainline
+DT) then console=tty0 last, so /dev/console and thus the Talos logs are
+on HDMI.
+---
+ artifacts/raspberrypi-firmware/pkg.yaml | 12 +++++++++++-
+ installers/rpi5/src/main.go             |  5 ++++-
+ 2 files changed, 15 insertions(+), 2 deletions(-)
+
+diff --git a/artifacts/raspberrypi-firmware/pkg.yaml b/artifacts/raspberrypi-firmware/pkg.yaml
+index 3308cfe..7b8befc 100644
+--- a/artifacts/raspberrypi-firmware/pkg.yaml
++++ b/artifacts/raspberrypi-firmware/pkg.yaml
+@@ -18,7 +18,17 @@ steps:
+         cp -v boot/LICENCE.broadcom /rootfs/artifacts/arm64/firmware/boot/LICENCE.broadcom
+         cp -v boot/COPYING.linux /rootfs/artifacts/arm64/firmware/boot/COPYING.linux
+         cp -rv boot/overlays /rootfs/artifacts/arm64/firmware/boot/overlays
+-        cp -rv /dtb/broadcom/bcm2712* /rootfs/artifacts/arm64/firmware/boot/
++        # Firmware / U-Boot stage: the Raspberry Pi (downstream) DTs of this
++        # firmware release. The firmware loads bcm2712-rpi-5-b.dtb (C1) or
++        # bcm2712d0-rpi-5-b.dtb (D0) from the partition root, applies
++        # overlays/ and hands the result to U-Boot, which only works with
++        # these (it dies on the mainline DT).
++        cp -v boot/bcm2712*.dtb /rootfs/artifacts/arm64/firmware/boot/
++        # Kernel stage: the mainline DTs of our kernel, where U-Boot's EFI
++        # boot looks for ${fdtfile} (/dtb/broadcom/bcm2712-rpi-5-b.dtb, or
++        # bcm2712-d-rpi-5-b.dtb on D0) and passes it to the kernel.
++        mkdir -p /rootfs/artifacts/arm64/firmware/boot/dtb/broadcom
++        cp -v /dtb/broadcom/bcm2712* /rootfs/artifacts/arm64/firmware/boot/dtb/broadcom/
+ finalize:
+   - from: /rootfs
+     to: /rootfs
+diff --git a/installers/rpi5/src/main.go b/installers/rpi5/src/main.go
+index 38cd824..29251d3 100644
+--- a/installers/rpi5/src/main.go
++++ b/installers/rpi5/src/main.go
+@@ -31,9 +31,12 @@ type rpiOptions struct {
+ func (i *RpiInstaller) GetOptions(extra rpiOptions) (overlay.Options, error) {
+ 	return overlay.Options{
+ 		Name: "rpi5",
++		// The last console= becomes /dev/console, where Talos logs: keep
++		// tty0 (HDMI) last. The Pi 5 debug UART is ttyAMA10 with the
++		// mainline device tree.
+ 		KernelArgs: []string{
++			"console=ttyAMA10,115200",
+ 			"console=tty0",
+-			"console=ttyAMA0,115200",
+ 			"sysctl.kernel.kexec_load_disabled=1",
+ 			"talos.dashboard.disabled=1",
+ 		},

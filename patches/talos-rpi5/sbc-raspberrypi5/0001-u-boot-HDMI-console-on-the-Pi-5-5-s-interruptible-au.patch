@@ -1,0 +1,98 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Martin Kuhn <martin@kuhn.host>
+Date: Sat, 19 Sep 2026 21:30:00 +0200
+Subject: [PATCH] u-boot: HDMI console on the Pi 5, 5 s interruptible autoboot
+
+Backport upstream U-Boot 812aca579140 ("video: arm: rpi: Add
+brcm,bcm2712-hdmi0 compatible") so the bcm2835 video driver binds to the
+Pi 5 HDMI node and U-Boot's console shows up on HDMI. rpi_5_defconfig
+already has VIDEO, VIDEO_BCM2835, USB_KEYBOARD and the console env; they
+are asserted in artifacts/u-boot/extra.config together with
+BOOTDELAY=5 (default 2). Nothing here changes which bootflow U-Boot
+picks or how it boots it.
+---
+ artifacts/u-boot/extra.config                 | 14 ++++++++++
+ ...pi-Add-brcm-bcm2712-hdmi0-compatible.patch | 27 +++++++++++++++++++
+ artifacts/u-boot/pkg.yaml                     | 12 +++++++++
+ 3 files changed, 53 insertions(+)
+ create mode 100644 artifacts/u-boot/extra.config
+ create mode 100644 artifacts/u-boot/patches/0001-video-arm-rpi-Add-brcm-bcm2712-hdmi0-compatible.patch
+
+diff --git a/artifacts/u-boot/extra.config b/artifacts/u-boot/extra.config
+new file mode 100644
+index 0000000..ed48b3c
+--- /dev/null
++++ b/artifacts/u-boot/extra.config
+@@ -0,0 +1,14 @@
++# Appended to rpi_5_defconfig's .config and resolved with `make olddefconfig`;
++# the build fails if any line below does not survive into the final .config.
++# Nothing here changes how U-Boot picks or boots a bootflow.
++
++# Console on HDMI and USB keyboard (already in rpi_5_defconfig; asserted here).
++# rpi.env sets stdin=serial,usbkbd / stdout=serial,vidconsole / stderr=serial,vidconsole.
++CONFIG_VIDEO=y
++CONFIG_VIDEO_BCM2835=y
++CONFIG_SYS_CONSOLE_IS_IN_ENV=y
++CONFIG_CONSOLE_MUX=y
++CONFIG_USB_KEYBOARD=y
++
++# 5 s window to interrupt autoboot (default 2).
++CONFIG_BOOTDELAY=5
+diff --git a/artifacts/u-boot/patches/0001-video-arm-rpi-Add-brcm-bcm2712-hdmi0-compatible.patch b/artifacts/u-boot/patches/0001-video-arm-rpi-Add-brcm-bcm2712-hdmi0-compatible.patch
+new file mode 100644
+index 0000000..990d88a
+--- /dev/null
++++ b/artifacts/u-boot/patches/0001-video-arm-rpi-Add-brcm-bcm2712-hdmi0-compatible.patch
+@@ -0,0 +1,27 @@
++From 812aca5791404ad5df469fe3240638573e39e063 Mon Sep 17 00:00:00 2001
++From: Peter Robinson <pbrobinson@gmail.com>
++Date: Tue, 21 Apr 2026 09:51:59 +0100
++Subject: [PATCH] video: arm: rpi: Add brcm,bcm2712-hdmi0 compatible
++
++The 'brcm,bcm2712-hdmi0' compatible string is used on RPi5.
++There appears to be no change that impacts early boot output
++on the display controller so add the RPi5 compatible string.
++
++Signed-off-by: Peter Robinson <pbrobinson@gmail.com>
++Reviewed-by: Matthias Brugger <mbrugger@suse.com>
++---
++ drivers/video/bcm2835.c | 1 +
++ 1 file changed, 1 insertion(+)
++
++diff --git a/drivers/video/bcm2835.c b/drivers/video/bcm2835.c
++index 0c81e6066229..0e0cc1979eb5 100644
++--- a/drivers/video/bcm2835.c
+++++ b/drivers/video/bcm2835.c
++@@ -66,6 +66,7 @@ static int bcm2835_video_probe(struct udevice *dev)
++ static const struct udevice_id bcm2835_video_ids[] = {
++ 	{ .compatible = "brcm,bcm2835-hdmi" },
++ 	{ .compatible = "brcm,bcm2711-hdmi0" },
+++	{ .compatible = "brcm,bcm2712-hdmi0" },
++ 	{ .compatible = "brcm,bcm2708-fb" },
++ #if !IS_ENABLED(CONFIG_VIDEO_DT_SIMPLEFB)
++ 	{ .compatible = "simple-framebuffer" },
+diff --git a/artifacts/u-boot/pkg.yaml b/artifacts/u-boot/pkg.yaml
+index 9d580a0..dc60638 100644
+--- a/artifacts/u-boot/pkg.yaml
++++ b/artifacts/u-boot/pkg.yaml
+@@ -14,8 +14,20 @@ steps:
+     prepare:
+       - |
+         tar xf u-boot.tar.gz --strip-components=1
++      - |
++        for patch in $(find /pkg/patches -type f -name "*.patch" | sort); do
++          patch -p1 < "$patch" || exit 1
++        done
+       - |
+         make rpi_5_defconfig
++      - |
++        # Extra options (HDMI console asserted, BOOTDELAY).
++        grep -v '^#' /pkg/extra.config | grep . >> .config
++        make olddefconfig
++        # Fail if kconfig dropped or changed any requested option.
++        grep -v '^#' /pkg/extra.config | grep . | while IFS= read -r opt; do
++          grep -qxF "$opt" .config || { echo "extra.config: '$opt' not in final .config" >&2; exit 1; }
++        done
+     build:
+       - |
+         make -j $(nproc) HOSTLDLIBS_mkimage="-lssl -lcrypto" u-boot.bin
