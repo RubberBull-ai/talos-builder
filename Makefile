@@ -70,7 +70,8 @@ checkouts-clean:
 .PHONY: patches-pkgs patches-talos patches-sbcoverlay patches
 patches-pkgs:
 	cd "$(CHECKOUTS_DIRECTORY)/pkgs" && \
-		git am --committer-date-is-author-date "$(PATCHES_DIRECTORY)/siderolabs/pkgs/0001-Patched-for-Raspberry-Pi-5.patch"
+		git am --committer-date-is-author-date "$(PATCHES_DIRECTORY)/siderolabs/pkgs/0001-Patched-for-Raspberry-Pi-5.patch" && \
+		git am --committer-date-is-author-date "$(PATCHES_DIRECTORY)/siderolabs/pkgs/0002-Drop-the-RP1-EEE-enable-backport.patch"
 
 patches-talos:
 	cd "$(CHECKOUTS_DIRECTORY)/talos" && \
