@@ -142,6 +142,31 @@ Our pkgs patches on top:
   with the 1 s watchdog (shorter stalls now count); compare the split
   between the two messages and etcd elections instead.
 
+### Findings after rolling `v1.14.1-rpi5.2` (2026-09-24)
+
+Rolled onto all six Pis (rpi-06 first, then control planes with the etcd
+leader last, then workers); Longhorn and etcd gates clean between nodes.
+
+- **Every stall is a lost/ignored TSTART, not a lost TCOMP.** First 30-40
+  min: 10 stalls, all `re-kicking TSTART`, 0 `reaping lost TCOMP`, with 4-11
+  descriptors not yet sent (TBQP behind head). The reap branch of 0018 is
+  unused insurance; the live benefit is the 250 ms tick (stalls end in
+  250-500 ms, the 2 s back-to-back pairs are gone).
+- **Stalls follow the etcd leader.** Leadership moved rpi-02 -> rpi-01 during
+  the roll; rpi-01 then stalled, rpi-02/03 did not. The leader sends the
+  most small packets (heartbeats + replication), so the trigger is packet
+  rate, not bandwidth (CPs push only ~3.6 Mbit/s).
+- **Elections are not the concern any more.** etcd runs `heartbeat-interval:
+  500` / `election-timeout: 5000` (talos#204); even 1-2 s stalls cannot trip
+  it. 0018 buys request latency, not elections.
+- **Where the cause is:** the doorbell write across PCIe to the RP1 is lost or
+  ignored under a high packet rate; 0001 (flush posted write after TSTART)
+  does not fully cover it. No upstream root-cause fix yet (sbc-raspberrypi#91;
+  Théo Lebrun reproduces a similar stall on non-PCIe EyeQ5 and suspects a race
+  in `macb_start_xmit`).
+- **Options:** move the control plane to the x86 lions (removes the RP1 from
+  etcd), or test a USB 2.5 GbE adapter (RTL8156) on the leader Pi.
+
 ## Patches
 
 ### `patches/siderolabs/pkgs/0001` - kernel config (config-arm64)
@@ -213,7 +238,8 @@ Unchanged logic (`NewAuto()` returns GRUB on arm64); modules-list hunk moved to 
 
 1. Boot-test on one Pi 5 (rpi-06) from PXE and NVMe with the fixes above
    (the risks listed above are addressed by them).
-2. Verify Ethernet stability over a few days (macb fixes are in).
+2. Ethernet: stalls remain (see Findings after `v1.14.1-rpi5.2`); decide
+   between control plane on the lions and a USB NIC test.
 3. Consider moving the overlay to one that ships DTBs matched to the mainline
    kernel *and* a PCIe-capable U-Boot (e.g. once sbc-raspberrypi PR #88 lands).
 
