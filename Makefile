@@ -71,7 +71,8 @@ checkouts-clean:
 patches-pkgs:
 	cd "$(CHECKOUTS_DIRECTORY)/pkgs" && \
 		git am --committer-date-is-author-date "$(PATCHES_DIRECTORY)/siderolabs/pkgs/0001-Patched-for-Raspberry-Pi-5.patch" && \
-		git am --committer-date-is-author-date "$(PATCHES_DIRECTORY)/siderolabs/pkgs/0002-Drop-the-RP1-EEE-enable-backport.patch"
+		git am --committer-date-is-author-date "$(PATCHES_DIRECTORY)/siderolabs/pkgs/0002-Drop-the-RP1-EEE-enable-backport.patch" && \
+		git am --committer-date-is-author-date "$(PATCHES_DIRECTORY)/siderolabs/pkgs/0003-Reap-lost-TCOMP-from-the-macb-TX-stall-watchdog.patch"
 
 patches-talos:
 	cd "$(CHECKOUTS_DIRECTORY)/talos" && \

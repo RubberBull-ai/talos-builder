@@ -1,0 +1,190 @@
+From 4b89f3f88748205055246615edbaa383e67955c2 Mon Sep 17 00:00:00 2001
+From: Martin Kuhn <martin@kuhn.host>
+Date: Thu, 24 Sep 2026 19:05:00 +0200
+Subject: [PATCH] Reap lost TCOMP from the macb TX stall watchdog
+
+Add kernel patch 0018 on top of the RP1 TX-stall series (0001-0003).
+The watchdog only re-asserted TSTART, which is a no-op when the frames
+went out and only the TCOMP interrupt was lost; the RP1 control planes
+still log "TX stall detected ... re-kicking TSTART" ~70-100x an hour
+with EEE off. The watchdog now schedules the TX NAPI poll when the
+descriptor at tx_tail is done, and ticks every 250 ms instead of 1 s.
+---
+ ...ost-TCOMP-from-the-TX-stall-watchdog.patch | 168 ++++++++++++++++++
+ 1 file changed, 168 insertions(+)
+ create mode 100644 kernel/build/patches/0018-net-macb-reap-lost-TCOMP-from-the-TX-stall-watchdog.patch
+
+diff --git a/kernel/build/patches/0018-net-macb-reap-lost-TCOMP-from-the-TX-stall-watchdog.patch b/kernel/build/patches/0018-net-macb-reap-lost-TCOMP-from-the-TX-stall-watchdog.patch
+new file mode 100644
+index 0000000..2b7ca38
+--- /dev/null
++++ b/kernel/build/patches/0018-net-macb-reap-lost-TCOMP-from-the-TX-stall-watchdog.patch
+@@ -0,0 +1,168 @@
++From 1e186a658106bd8fbcacbed3f4fe0fc18f23c703 Mon Sep 17 00:00:00 2001
++From: Martin Kuhn <martin@kuhn.host>
++Date: Thu, 24 Sep 2026 19:00:00 +0200
++Subject: [PATCH] net: macb: reap lost TCOMP from the TX stall watchdog
++
++The TX stall watchdog added by "net: macb: add TX stall watchdog to
++recover from lost TCOMP interrupts" only calls macb_tx_restart(). That
++re-asserts TSTART when TBQP is behind the driver's head, which covers a
++lost doorbell write. It does not cover a lost TCOMP interrupt: the
++hardware has already sent the frames and TBQP equals the head, so
++macb_tx_restart() returns without doing anything, and nothing reaps the
++ring. BQL stops the queue after a few packets, no further xmit kicks
++TSTART or raises TCOMP, and the ring stays stuck until some later event.
++
++On Raspberry Pi 5 (RP1) etcd control planes the watchdog logs this ~70-100
++times an hour with only 2-11 descriptors outstanding, often twice in a
++row two seconds apart, i.e. the first "re-kick" did not recover it.
++
++When the ring is stalled and the descriptor at tx_tail has TX_USED set,
++schedule the TX NAPI poll so macb_tx_complete() reaps it, then still
++call macb_tx_restart() for descriptors the hardware has not reached.
++The warning now says which of the two it did.
++
++Also shorten the tick from 1000 ms to 250 ms. A stall counts only when
++the ring was non-empty at the previous tick, is still non-empty, and
++tx_tail has not moved in between, so the oldest pending descriptor has
++waited at least one full interval and a packet queued just before a
++tick after an idle period is not reported. A stall now lasts 250-500 ms
++instead of 1-2 s, well inside etcd's 500 ms heartbeat / 5 s election
++timeout.
++
++Signed-off-by: Martin Kuhn <martin@kuhn.host>
++---
++ drivers/net/ethernet/cadence/macb.h      |  4 +-
++ drivers/net/ethernet/cadence/macb_main.c | 57 +++++++++++++++++-------
++ 2 files changed, 44 insertions(+), 17 deletions(-)
++
++diff --git a/drivers/net/ethernet/cadence/macb.h b/drivers/net/ethernet/cadence/macb.h
++index 1a3d11d..09c1504 100644
++--- a/drivers/net/ethernet/cadence/macb.h
+++++ b/drivers/net/ethernet/cadence/macb.h
++@@ -1284,10 +1284,12 @@ struct macb_queue {
++ 	 * tx_stall_tail_moved is set by macb_tx_complete() when tx_tail
++ 	 * advances and cleared by the watchdog tick on each pass (both
++ 	 * under tx_ptr_lock).  Using a bool sidesteps any ring-index
++-	 * aliasing concern between ticks.
+++	 * aliasing concern between ticks.  tx_stall_was_pending records
+++	 * whether the ring was non-empty at the previous tick.
++ 	 */
++ 	struct delayed_work	tx_stall_watchdog_work;
++ 	bool			tx_stall_tail_moved;
+++	bool			tx_stall_was_pending;
++ 
++ 	struct napi_struct	napi_tx;
++ 
++diff --git a/drivers/net/ethernet/cadence/macb_main.c b/drivers/net/ethernet/cadence/macb_main.c
++index 04791fd..853c231 100644
++--- a/drivers/net/ethernet/cadence/macb_main.c
+++++ b/drivers/net/ethernet/cadence/macb_main.c
++@@ -2008,18 +2008,17 @@ static int macb_tx_poll(struct napi_struct *napi, int budget)
++ 	return work_done;
++ }
++ 
++-#define MACB_TX_STALL_INTERVAL_MS	1000
+++#define MACB_TX_STALL_INTERVAL_MS	250
++ 
++ /*
++  * TX stall watchdog.
++  *
++- * Recovers from lost TCOMP interrupts on PCIe-attached macb
++- * instances.  macb already has a recovery chain
++- * (txubr_pending -> macb_tx_restart()) that fires on TCOMP; if
++- * TCOMP itself is lost the TX ring stalls silently until something
++- * else kicks TSTART.  This watchdog runs once per second per queue
++- * and calls macb_tx_restart() if the ring is non-empty and
++- * tx_tail has not advanced since the previous tick.
+++ * Recovers from lost TSTART writes and lost TCOMP interrupts on
+++ * PCIe-attached macb instances.  The watchdog runs every
+++ * MACB_TX_STALL_INTERVAL_MS per queue.  The ring counts as stalled
+++ * when it was non-empty at the previous tick, is still non-empty,
+++ * and tx_tail has not advanced in between, i.e. the oldest pending
+++ * descriptor has waited at least one full interval.
++  *
++  * Movement is tracked via the tx_stall_tail_moved boolean rather
++  * than a tx_tail snapshot, sidestepping any ring-index aliasing
++@@ -2027,10 +2026,20 @@ static int macb_tx_poll(struct napi_struct *napi, int budget)
++  * advances and cleared here on each tick; both writes are under
++  * tx_ptr_lock so no atomic is required.
++  *
++- * macb_tx_restart() already checks the hardware's TBQP against
++- * the driver's head index before re-asserting TSTART, so on a
++- * healthy ring this is a no-op at the hardware level.  The
++- * watchdog only supplies the missing trigger.
+++ * Two cases are handled:
+++ *
+++ * - The hardware has finished descriptors (TX_USED set at tx_tail)
+++ *   but TCOMP never raised an interrupt.  Nothing reaps the ring,
+++ *   BQL stops the queue after a few packets, so no further xmit
+++ *   kicks TSTART or raises TCOMP.  TBQP already equals the head, so
+++ *   macb_tx_restart() is a no-op; schedule the TX NAPI poll instead.
+++ *
+++ * - The TSTART doorbell was lost.  macb_tx_restart() checks TBQP
+++ *   against the driver's head index and re-asserts TSTART.
+++ *
+++ * Both actions are harmless on a healthy ring: the poll reaps
+++ * nothing and re-enables TCOMP, and TSTART is only written when
+++ * the hardware is behind the head.
++  */
++ static void macb_tx_stall_watchdog(struct work_struct *work)
++ {
++@@ -2040,6 +2049,8 @@ static void macb_tx_stall_watchdog(struct work_struct *work)
++ 	struct macb *bp = queue->bp;
++ 	unsigned int cur_tail, cur_head;
++ 	bool stalled = false;
+++	bool pending;
+++	bool reap;
++ 	unsigned long flags;
++ 
++ 	if (!netif_running(bp->dev))
++@@ -2048,23 +2059,36 @@ static void macb_tx_stall_watchdog(struct work_struct *work)
++ 	/* No carrier => no completion is possible.  Skip the check
++ 	 * but keep the watchdog ticking for when carrier comes up.
++ 	 */
++-	if (!netif_carrier_ok(bp->dev))
+++	if (!netif_carrier_ok(bp->dev)) {
+++		queue->tx_stall_was_pending = false;
++ 		goto reschedule;
+++	}
++ 
++ 	spin_lock_irqsave(&queue->tx_ptr_lock, flags);
++ 	cur_tail = queue->tx_tail;
++ 	cur_head = queue->tx_head;
++-	if (cur_head != cur_tail && !queue->tx_stall_tail_moved)
+++	pending = cur_head != cur_tail;
+++	if (pending && queue->tx_stall_was_pending &&
+++	    !queue->tx_stall_tail_moved)
++ 		stalled = true;
+++	queue->tx_stall_was_pending = pending;
++ 	queue->tx_stall_tail_moved = false;
++ 	spin_unlock_irqrestore(&queue->tx_ptr_lock, flags);
++ 
++ 	if (stalled) {
+++		reap = macb_tx_complete_pending(queue);
++ 		if (printk_ratelimit())
++ 			netdev_warn(bp->dev,
++-				    "TX stall detected on queue %u (tail=%u head=%u); re-kicking TSTART\n",
+++				    "TX stall detected on queue %u (tail=%u head=%u); %s\n",
++ 				    (unsigned int)(queue - bp->queues),
++-				    cur_tail, cur_head);
+++				    cur_tail, cur_head,
+++				    reap ? "reaping lost TCOMP" :
+++					   "re-kicking TSTART");
+++		if (reap) {
+++			local_bh_disable();
+++			napi_schedule(&queue->napi_tx);
+++			local_bh_enable();
+++		}
++ 		macb_tx_restart(queue);
++ 	}
++ 
++@@ -3314,6 +3338,7 @@ static int macb_open(struct net_device *dev)
++ 		napi_enable(&queue->napi_rx);
++ 		napi_enable(&queue->napi_tx);
++ 		queue->tx_stall_tail_moved = true;
+++		queue->tx_stall_was_pending = false;
++ 		schedule_delayed_work(&queue->tx_stall_watchdog_work,
++ 				      msecs_to_jiffies(MACB_TX_STALL_INTERVAL_MS));
++ 	}

@@ -127,6 +127,21 @@ they are in `kernel/build/patches` at f694e1b:
 The config keeps `MACB=y`, `MISC_RP1=y`, `PINCTRL_RP1=y`, `COMMON_CLK_RP1=y`,
 `PCIE_BRCMSTB=y`, `BCM2712_MIP=y`, NVMe built in.
 
+Our pkgs patches on top:
+
+- 0002 deletes 0011 (EEE enable for RP1), tag `v1.14.1-rpi5.1`. Did **not**
+  help: on 2026-09-24 rpi-01..03 ran that kernel for 10-18 h and still logged
+  73-101 TX stalls/h (rpi-02: ~3300 pkt/s, 2-11 descriptors outstanding,
+  stalls often in pairs 2 s apart). EEE is not the root cause upstream either
+  (stalls predate the EEE backport; still open, sbc-raspberrypi#91).
+- 0003 adds kernel patch 0018: the stall watchdog (0003) only re-asserted
+  TSTART, a no-op when the frames went out and only the TCOMP interrupt was
+  lost (TBQP == head). It now schedules the TX NAPI poll when the descriptor
+  at `tx_tail` is TX_USED, ticks every 250 ms instead of 1 s, and logs
+  `reaping lost TCOMP` or `re-kicking TSTART`. Stall counts are not comparable
+  with the 1 s watchdog (shorter stalls now count); compare the split
+  between the two messages and etcd elections instead.
+
 ## Patches
 
 ### `patches/siderolabs/pkgs/0001` - kernel config (config-arm64)
