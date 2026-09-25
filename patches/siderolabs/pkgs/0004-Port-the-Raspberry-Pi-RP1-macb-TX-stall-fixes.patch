@@ -1,0 +1,219 @@
+From 058dd20160eb8ec4bc8e63a8db3e75b88fce809f Mon Sep 17 00:00:00 2001
+From: Martin Kuhn <martin@kuhn.host>
+Date: Fri, 25 Sep 2026 19:05:00 +0200
+Subject: [PATCH] Port the Raspberry Pi RP1 macb TX stall fixes
+
+Add kernel patch 0019: the RP1 Ethernet fixes from the Raspberry Pi
+kernel (raspberrypi/linux e45c98decbb1) that Talos 1.11 had and
+mainline never got: re-assert TSTART from the TX poll when it was
+written while TGO was set (linux-2712#89), 50 us default interrupt
+moderation, and the AXI max pipeline settings for RP1.
+---
+ ...e-Raspberry-Pi-RP1-TX-stall-fixes-fr.patch | 198 ++++++++++++++++++
+ 1 file changed, 198 insertions(+)
+ create mode 100644 kernel/build/patches/0019-net-macb-port-the-Raspberry-Pi-RP1-TX-stall-fixes-fr.patch
+
+diff --git a/kernel/build/patches/0019-net-macb-port-the-Raspberry-Pi-RP1-TX-stall-fixes-fr.patch b/kernel/build/patches/0019-net-macb-port-the-Raspberry-Pi-RP1-TX-stall-fixes-fr.patch
+new file mode 100644
+index 0000000..9325e8e
+--- /dev/null
++++ b/kernel/build/patches/0019-net-macb-port-the-Raspberry-Pi-RP1-TX-stall-fixes-fr.patch
+@@ -0,0 +1,198 @@
++From e6af7cca983e52fa9d4ba0e5337a1b1bc28d8500 Mon Sep 17 00:00:00 2001
++From: Martin Kuhn <martin@kuhn.host>
++Date: Fri, 25 Sep 2026 19:00:00 +0200
++Subject: [PATCH] net: macb: port the Raspberry Pi RP1 TX stall fixes from
++ rpi-6.12.y
++
++The Raspberry Pi kernel carries RP1 Ethernet fixes that never went
++upstream, squashed into raspberrypi/linux e45c98decbb1 ("net: macb:
++Several patches for RP1", Jonathan Bell / Phil Elwell). Talos 1.11 ran
++that kernel (stable_20250428, 6.12.25) and did not stall; on mainline
++6.18.51 the Pi 5 logs "TX stall detected ... re-kicking TSTART" up to
++~100x an hour on the busiest node, every one with TBQP behind head, i.e.
++a TSTART the MAC did not act on. Port the three parts that bear on it:
++
++- net: macb: add hack to prevent TX stalls in a quiet system
++  (raspberrypi/linux-2712#89): "There is some critical window during TX
++  where a further write to the TSTART bit while TX is active does not
++  cause newly queued TX descriptors to be consumed." If TGO is set when
++  start_xmit writes TSTART, mark the queue; the next TCOMP then goes
++  through the txubr_pending path and the TX poll re-asserts TSTART.
++
++- net: macb: set default interrupt moderation for GEM hardware: 50 us
++  for RX and TX instead of 0 ("the MAC can generate over 130,000
++  interrupts per second").
++
++- macb: add device tree properties that allow configuration of the AXI
++  max pipeline register (cdns,aw2w-max-pipe, cdns,ar2r-max-pipe,
++  cdns,use-aw2b-fill), with the values the Raspberry Pi rp1.dtsi sets
++  (8 / 8 / fill) added to the mainline rp1-common.dtsi.
++
++The TX stall watchdog (0003, 0018) stays as a safety net.
++
++Link: https://github.com/raspberrypi/linux/commit/e45c98decbb1
++Link: https://github.com/raspberrypi/linux-2712/issues/89
++Signed-off-by: Martin Kuhn <martin@kuhn.host>
++---
++ arch/arm64/boot/dts/broadcom/rp1-common.dtsi |  3 ++
++ drivers/net/ethernet/cadence/macb.h          | 23 ++++++++++
++ drivers/net/ethernet/cadence/macb_main.c     | 48 +++++++++++++++++++-
++ 3 files changed, 73 insertions(+), 1 deletion(-)
++
++diff --git a/arch/arm64/boot/dts/broadcom/rp1-common.dtsi b/arch/arm64/boot/dts/broadcom/rp1-common.dtsi
++index 5a815c3..be005b8 100644
++--- a/arch/arm64/boot/dts/broadcom/rp1-common.dtsi
+++++ b/arch/arm64/boot/dts/broadcom/rp1-common.dtsi
++@@ -49,6 +49,9 @@ pci_ep_bus: pci-ep-bus@1 {
++ 			 <&rp1_clocks RP1_CLK_ETH>,
++ 			 <&rp1_clocks RP1_CLK_ETH_TSU>;
++ 		clock-names = "pclk", "hclk", "tx_clk", "tsu_clk";
+++		cdns,aw2w-max-pipe = /bits/ 8 <8>;
+++		cdns,ar2r-max-pipe = /bits/ 8 <8>;
+++		cdns,use-aw2b-fill;
++ 		local-mac-address = [00 00 00 00 00 00];
++ 		status = "disabled";
++ 
++diff --git a/drivers/net/ethernet/cadence/macb.h b/drivers/net/ethernet/cadence/macb.h
++index 09c1504..142ef41 100644
++--- a/drivers/net/ethernet/cadence/macb.h
+++++ b/drivers/net/ethernet/cadence/macb.h
++@@ -83,6 +83,8 @@
++ #define GEM_NCFGR		0x0004 /* Network Config */
++ #define GEM_USRIO		0x000c /* User IO */
++ #define GEM_DMACFG		0x0010 /* DMA Configuration */
+++#define GEM_AMP			0x0054 /* AXI Max Pipeline */
+++#define GEM_INTMOD		0x005c /* Interrupt moderation */
++ #define GEM_PBUFRXCUT		0x0044 /* RX Partial Store and Forward */
++ #define GEM_JML			0x0048 /* Jumbo Max Length */
++ #define GEM_HS_MAC_CONFIG	0x0050 /* GEM high speed config */
++@@ -371,6 +373,22 @@
++ #define GEM_ENCUTTHRU_OFFSET	31 /* Enable RX partial store and forward */
++ #define GEM_ENCUTTHRU_SIZE	1
++ 
+++/* Bitfields in AMP */
+++#define GEM_AR2R_MAX_PIPE_OFFSET	0  /* Maximum number of outstanding AXI read requests */
+++#define GEM_AR2R_MAX_PIPE_SIZE		8
+++#define GEM_AW2W_MAX_PIPE_OFFSET	8  /* Maximum number of outstanding AXI write requests */
+++#define GEM_AW2W_MAX_PIPE_SIZE		8
+++#define GEM_AW2B_FILL_OFFSET		16 /* Select wether the max AW2W transactions operates between: */
+++#define GEM_AW2B_FILL_AW2W		0  /*   0: the AW to W AXI channel */
+++#define GEM_AW2B_FILL_AW2B		1  /*   1: AW to B channel */
+++#define GEM_AW2B_FILL_SIZE		1
+++
+++/* Bitfields in INTMOD */
+++#define GEM_RX_MODERATION_OFFSET	0  /* RX interrupt moderation */
+++#define GEM_RX_MODERATION_SIZE		8
+++#define GEM_TX_MODERATION_OFFSET	16 /* TX interrupt moderation */
+++#define GEM_TX_MODERATION_SIZE		8
+++
++ /* Bitfields in NSR */
++ #define MACB_NSR_LINK_OFFSET	0 /* pcs_link_state */
++ #define MACB_NSR_LINK_SIZE	1
++@@ -1279,6 +1297,7 @@ struct macb_queue {
++ 	dma_addr_t		tx_ring_dma;
++ 	struct work_struct	tx_error_task;
++ 	bool			txubr_pending;
+++	bool			tx_pending;
++ 
++ 	/* TX stall watchdog -- see macb_tx_stall_watchdog() in macb_main.c.
++ 	 * tx_stall_tail_moved is set by macb_tx_complete() when tx_tail
++@@ -1376,6 +1395,10 @@ struct macb {
++ 	/* holds value of rx watermark value for pbuf_rxcutthru register */
++ 	u32			rx_watermark;
++ 
+++	u8			aw2w_max_pipe;
+++	u8			ar2r_max_pipe;
+++	bool			use_aw2b_fill;
+++
++ 	struct macb_ptp_info	*ptp_info;	/* macb-ptp interface */
++ 
++ 	struct phy		*sgmii_phy;	/* for ZynqMP SGMII mode */
++diff --git a/drivers/net/ethernet/cadence/macb_main.c b/drivers/net/ethernet/cadence/macb_main.c
++index 853c231..666a055 100644
++--- a/drivers/net/ethernet/cadence/macb_main.c
+++++ b/drivers/net/ethernet/cadence/macb_main.c
++@@ -2245,8 +2245,9 @@ static irqreturn_t macb_interrupt(int irq, void *dev_id)
++ 				queue_writel(queue, ISR, MACB_BIT(TCOMP) |
++ 							 MACB_BIT(TXUBR));
++ 
++-			if (status & MACB_BIT(TXUBR)) {
+++			if (status & MACB_BIT(TXUBR) || queue->tx_pending) {
++ 				queue->txubr_pending = true;
+++				queue->tx_pending = 0;
++ 				wmb(); // ensure softirq can see update
++ 			}
++ 
++@@ -2705,6 +2706,11 @@ static netdev_tx_t macb_start_xmit(struct sk_buff *skb, struct net_device *dev)
++ 
++ 	spin_lock(&bp->lock);
++ 	macb_tx_lpi_wake(bp);
+++
+++	/* TSTART write might get dropped, so make the IRQ retrigger a buffer read */
+++	if (macb_readl(bp, TSR) & MACB_BIT(TGO))
+++		queue->tx_pending = 1;
+++
++ 	macb_writel(bp, NCR, macb_readl(bp, NCR) | MACB_BIT(TSTART));
++ 	/* Flush PCIe posted-write queue; see comment in macb_tx_restart(). */
++ 	if (bp->caps & MACB_CAPS_PCIE_POSTED_WRITES)
++@@ -3153,6 +3159,37 @@ static void macb_configure_dma(struct macb *bp)
++ 	}
++ }
++ 
+++static void gem_init_axi(struct macb *bp)
+++{
+++	u32 amp;
+++
+++	/* AXI pipeline setup - don't touch values unless specified in device
+++	 * tree. Some hardware could have reset values > 1.
+++	 */
+++	amp = gem_readl(bp, AMP);
+++
+++	if (bp->use_aw2b_fill)
+++		amp = GEM_BFINS(AW2B_FILL, bp->use_aw2b_fill, amp);
+++	if (bp->aw2w_max_pipe)
+++		amp = GEM_BFINS(AW2W_MAX_PIPE, bp->aw2w_max_pipe, amp);
+++	if (bp->ar2r_max_pipe)
+++		amp = GEM_BFINS(AR2R_MAX_PIPE, bp->ar2r_max_pipe, amp);
+++
+++	gem_writel(bp, AMP, amp);
+++}
+++
+++static void gem_init_intmod(struct macb *bp)
+++{
+++	unsigned int throttle;
+++	u32 intmod = 0;
+++
+++	/* Use sensible interrupt moderation thresholds (50us rx and tx) */
+++	throttle = (1000 * 50) / 800;
+++	intmod = GEM_BFINS(TX_MODERATION, throttle, intmod);
+++	intmod = GEM_BFINS(RX_MODERATION, throttle, intmod);
+++	gem_writel(bp, INTMOD, intmod);
+++}
+++
++ static void macb_init_hw(struct macb *bp)
++ {
++ 	u32 config;
++@@ -3181,6 +3218,11 @@ static void macb_init_hw(struct macb *bp)
++ 	if (bp->caps & MACB_CAPS_JUMBO)
++ 		bp->rx_frm_len_mask = MACB_RX_JFRMLEN_MASK;
++ 
+++	if (macb_is_gem(bp)) {
+++		gem_init_axi(bp);
+++		gem_init_intmod(bp);
+++	}
+++
++ 	macb_configure_dma(bp);
++ 
++ 	/* Enable RX partial store and forward and set watermark */
++@@ -5872,6 +5914,10 @@ static int macb_probe(struct platform_device *pdev)
++ 	}
++ 	bp->num_queues = num_queues;
++ 	bp->queue_mask = queue_mask;
+++
+++	device_property_read_u8(&pdev->dev, "cdns,aw2w-max-pipe", &bp->aw2w_max_pipe);
+++	device_property_read_u8(&pdev->dev, "cdns,ar2r-max-pipe", &bp->ar2r_max_pipe);
+++	bp->use_aw2b_fill = device_property_read_bool(&pdev->dev, "cdns,use-aw2b-fill");
++ 	if (macb_config)
++ 		bp->dma_burst_length = macb_config->dma_burst_length;
++ 	bp->pclk = pclk;

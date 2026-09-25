@@ -167,6 +167,29 @@ leader last, then workers); Longhorn and etcd gates clean between nodes.
 - **Options:** move the control plane to the x86 lions (removes the RP1 from
   etcd), or test a USB 2.5 GbE adapter (RTL8156) on the leader Pi.
 
+### Likely root cause: RP1 fixes lost in the switch to mainline (`v1.14.1-rpi5.3`)
+
+The stalls are new with 1.14. v1.11.5.2 ran the Raspberry Pi kernel
+(`raspberrypi/linux stable_20250428`), which carries RP1 Ethernet fixes that
+never went upstream, squashed into raspberrypi/linux `e45c98decbb1` ("net:
+macb: Several patches for RP1"). Mainline 6.18.51 has none of them. pkgs
+patch 0004 adds kernel patch 0019, which ports the three that matter:
+
+- **TSTART while TX is active** ("add hack to prevent TX stalls in a quiet
+  system", raspberrypi/linux-2712#89): if `TGO` is set when `start_xmit` writes
+  TSTART, the MAC may not pick up the new descriptors. The queue is marked and
+  the next TCOMP re-asserts TSTART from the TX poll. Matches the soak exactly:
+  every stall is `re-kicking TSTART` with TBQP behind head.
+- **Interrupt moderation** 50 us RX/TX by default (mainline: 0, one IRQ per
+  packet).
+- **AXI max pipeline** `cdns,aw2w-max-pipe = 8`, `cdns,ar2r-max-pipe = 8`,
+  `cdns,use-aw2b-fill` (driver support + the values in mainline
+  `rp1-common.dtsi`, as the Raspberry Pi `rp1.dtsi` sets them).
+
+Soak on rpi5.2 before this (1 h, 2026-09-25 06-07 UTC): rpi-01 (leader) 99,
+rpi-03 52, rpi-02 12 stalls/h, workers 0, one `reaping lost TCOMP`, no
+elections. Compare the leader's count on rpi5.3.
+
 ## Patches
 
 ### `patches/siderolabs/pkgs/0001` - kernel config (config-arm64)
@@ -238,8 +261,8 @@ Unchanged logic (`NewAuto()` returns GRUB on arm64); modules-list hunk moved to 
 
 1. Boot-test on one Pi 5 (rpi-06) from PXE and NVMe with the fixes above
    (the risks listed above are addressed by them).
-2. Ethernet: stalls remain (see Findings after `v1.14.1-rpi5.2`); decide
-   between control plane on the lions and a USB NIC test.
+2. Ethernet: roll `v1.14.1-rpi5.3` (RP1 fixes from the Raspberry Pi kernel)
+   and compare the etcd leader's stall count with rpi5.2.
 3. Consider moving the overlay to one that ships DTBs matched to the mainline
    kernel *and* a PCIe-capable U-Boot (e.g. once sbc-raspberrypi PR #88 lands).
 
