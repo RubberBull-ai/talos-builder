@@ -188,7 +188,13 @@ patch 0004 adds kernel patch 0019, which ports the three that matter:
 
 Soak on rpi5.2 before this (1 h, 2026-09-25 06-07 UTC): rpi-01 (leader) 99,
 rpi-03 52, rpi-02 12 stalls/h, workers 0, one `reaping lost TCOMP`, no
-elections. Compare the leader's count on rpi5.3.
+elections.
+
+**Result (rpi5.3 on all six Pis, 2026-09-25 ~20:35 local):** 0 TX stalls on every
+Pi, including the etcd leader (rpi-02, was 99-112/h on rpi5.2). The AXI
+properties are present in the live device tree
+(`.../rp1_nexus/pci-ep-bus@1/ethernet@40100000/cdns,*`). Root cause confirmed:
+the Raspberry Pi kernel fixes lost in the switch to mainline, not EEE or load.
 
 ## Patches
 
@@ -261,8 +267,8 @@ Unchanged logic (`NewAuto()` returns GRUB on arm64); modules-list hunk moved to 
 
 1. Boot-test on one Pi 5 (rpi-06) from PXE and NVMe with the fixes above
    (the risks listed above are addressed by them).
-2. Ethernet: roll `v1.14.1-rpi5.3` (RP1 fixes from the Raspberry Pi kernel)
-   and compare the etcd leader's stall count with rpi5.2.
+2. Ethernet: done in `v1.14.1-rpi5.3`. Consider upstreaming 0019 (the TGO
+   TSTART re-kick in particular) to netdev, so a future pkgs bump keeps it.
 3. Consider moving the overlay to one that ships DTBs matched to the mainline
    kernel *and* a PCIe-capable U-Boot (e.g. once sbc-raspberrypi PR #88 lands).
 
